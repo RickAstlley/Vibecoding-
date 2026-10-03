@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { Explorer } from '@/components/explorer/Explorer';
 import { CodeEditor } from '@/components/editor/CodeEditor';
-import { Preview, type ConsoleEntry } from '@/components/preview/Preview';
+import { Preview, type ConsoleEntry, type SmokeState } from '@/components/preview/Preview';
 import { Chat } from '@/components/chat/Chat';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
 import { useFiles } from '@/stores/files';
@@ -45,6 +45,9 @@ export default function WeaverPage() {
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
   const [progress, setProgress] = useState({ running: false, step: 0, maxSteps: 30, tokensUsed: 0, status: '' });
   const [previewToken, setPreviewToken] = useState(0);
+  const [previewAutoReload, setPreviewAutoReload] = useState(true);
+  const [previewSmoke, setPreviewSmoke] = useState(true);
+  const [smokeResult, setSmokeResult] = useState<SmokeState | null>(null);
   const runtimeRef = useRef<AgentRuntime | null>(null);
   const approvalResolvers = useRef(new Map<string, (ok: boolean) => void>());
 
@@ -451,7 +454,15 @@ export default function WeaverPage() {
               {sidePanel === 'settings' ? (
                 <SettingsPanel />
               ) : sidePanel === 'preview' ? (
-                <Preview refreshToken={previewToken} onConsoleChange={setConsoleEntries} />
+                <Preview
+                  refreshToken={previewToken}
+                  autoReload={previewAutoReload}
+                  onToggleAutoReload={() => setPreviewAutoReload((v) => !v)}
+                  smokeTest={previewSmoke}
+                  onToggleSmoke={() => setPreviewSmoke((v) => !v)}
+                  onSmokeChange={setSmokeResult}
+                  onConsoleChange={setConsoleEntries}
+                />
               ) : (
                 <Chat
                   messages={ui.messages}
@@ -494,10 +505,17 @@ export default function WeaverPage() {
         </div>
       )}
 
-      {consoleEntries.length > 0 && sidePanel !== 'preview' && (
-        <div className="pointer-events-none fixed bottom-1 right-1 rounded bg-card/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-          preview: {consoleEntries.length} log(s)
-        </div>
+      {sidePanel !== 'preview' && (smokeResult?.state === 'failed' || consoleEntries.length > 0) && (
+        <button
+          type="button"
+          onClick={() => switchPanel('preview')}
+          className={`pointer-events-auto fixed bottom-1 right-1 rounded bg-card/90 px-2 py-0.5 font-mono text-[10px] ${
+            smokeResult?.state === 'failed' ? 'text-destructive' : 'text-muted-foreground'
+          }`}
+          title={smokeResult?.state === 'failed' ? smokeResult.message : `${consoleEntries.length} log(s) no preview`}
+        >
+          preview: {smokeResult?.state === 'failed' ? 'erro' : `${consoleEntries.length} log(s)`}
+        </button>
       )}
     </div>
   );

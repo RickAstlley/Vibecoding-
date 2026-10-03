@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ExternalLink, Monitor, RotateCw, Smartphone, Tablet, Trash2, AlertTriangle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ExternalLink, Monitor, RotateCw, Smartphone, Tablet, Trash2 } from 'lucide-react';
 import { vfs } from '@/core/vfs/vfs';
 
 export interface ConsoleEntry {
@@ -14,12 +14,61 @@ type Viewport = 'mobile' | 'tablet' | 'desktop';
 
 const WIDTHS: Record<Viewport, number> = { mobile: 390, tablet: 768, desktop: 0 };
 
+const AUTO_RELOAD_DEBOUNCE_MS = 700;
+const SMOKE_TIMEOUT_MS = 6000;
+
+export interface SmokeState {
+  state: 'running' | 'ok' | 'failed';
+  message: string;
+}
+
 export interface PreviewProps {
   refreshToken: number;
   onConsoleChange?(entries: ConsoleEntry[]): void;
+  /** Liga/desliga o recarregamento automatico apos mudanca de arquivo. */
+  autoReload?: boolean;
+  onToggleAutoReload?(): void;
+  /** Smoke test: rodar verificacao de erro fatal a cada reload. */
+  smokeTest?: boolean;
+  onToggleSmoke?(): void;
+  onSmokeChange?(state: SmokeState | null): void;
 }
 
-export function Preview({ refreshToken, onConsoleChange }: PreviewProps) {
+function ToggleBtn({
+  active,
+  onClick,
+  title,
+  label,
+}: {
+  active: boolean;
+  onClick(): void;
+  title: string;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-pressed={active}
+      className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${
+        active ? 'bg-arc/20 text-arc-fg' : 'text-muted-foreground hover:text-foreground'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+export function Preview({
+  refreshToken,
+  onConsoleChange,
+  autoReload = true,
+  onToggleAutoReload,
+  smokeTest = false,
+  onToggleSmoke,
+  onSmokeChange,
+}: PreviewProps) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
   const [entries, setEntries] = useState<ConsoleEntry[]>([]);
@@ -28,6 +77,9 @@ export function Preview({ refreshToken, onConsoleChange }: PreviewProps) {
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [fatal, setFatal] = useState<string | null>(
     typeof navigator !== 'undefined' && !('serviceWorker' in navigator) ? 'Service Worker indisponivel neste navegador' : null,
+  );
+  const [smoke, setSmoke] = useState<SmokeState | null>(() =>
+    smokeTest && entry ? { state: 'running', message: 'Verificando preview...' } : null,
   );
 
   const push = useCallback(
@@ -98,23 +150,93 @@ export function Preview({ refreshToken, onConsoleChange }: PreviewProps) {
     };
   }, [ready, refreshToken, syncVfs]);
 
+  const smokeErrors = useRef<string[]>([]);
+  const smokeTimer = useRef<number | null>(null);
+
+  const finishSmoke = useCallback(
+    (state: SmokeState['state'], message: string) => {
+      if (smokeTimer.current !== null) {
+        window.clearTimeout(smokeTimer.current);
+        smokeTimer.current = null;
+      }
+      const next: SmokeState = { state, message };
+      setSmoke(next);
+      onSmokeChange?.(next);
+    },
+    [onSmokeChange],
+  );
+
   useEffect(() => {
     const handler = (e: MessageEvent): void => {
       const data = e.data as { type?: string; level?: ConsoleEntry['level']; text?: string };
-      if (data?.type === 'console') push(data.level ?? 'log', data.text ?? '');
-      if (data?.type === 'ready') setFatal(null);
+      if (data?.type === 'console') {
+        const level = data.level ?? 'log';
+        push(level, data.text ?? '');
+        if (smokeTest && level === 'error' && data.text) {
+          smokeErrors.current.push(data.text);
+          finishSmoke('failed', data.text);
+        }
+      }
+      if (data?.type === 'ready') {
+        setFatal(null);
+        finishSmoke('ok', 'Preview carregou sem erro fatal');
+      }
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [push]);
+  }, [push, smokeTest, finishSmoke]);
 
   const reloadKey = useRef(0);
   const [reloadNonce, setReloadNonce] = useState(0);
+  const autoReloadEnabled = autoReload;
+
+  // Dispara o smoke test: se a pagina nao mandar 'ready' nem erro em tempo
+  // razoavel, tratamos como falha (script quebrado antes do bridge).
+  useEffect(() => {
+    if (!smokeTest || !entry) return;
+    const timer = window.setTimeout(() => {
+      finishSmoke('failed', 'Preview nao respondeu em 6s (o script pode ter falhado antes do console)');
+    }, SMOKE_TIMEOUT_MS);
+    smokeTimer.current = timer;
+    return () => {
+      if (smokeTimer.current !== null) window.clearTimeout(smokeTimer.current);
+      smokeTimer.current = null;
+    };
+  }, [smokeTest, entry, reloadNonce, finishSmoke]);
+
+  const startSmoke = useCallback((): void => {
+    if (!smokeTest) {
+      setSmoke(null);
+      return;
+    }
+    const next: SmokeState = { state: 'running', message: 'Verificando preview...' };
+    setSmoke(next);
+    onSmokeChange?.(next);
+  }, [smokeTest, onSmokeChange]);
+
   const reload = (): void => {
     setEntries([]);
+    smokeErrors.current = [];
+    startSmoke();
     reloadKey.current += 1;
     setReloadNonce(reloadKey.current);
   };
+
+  /**
+   * Auto-reload com debounce: cada patch/save renova o cache do Service
+   * Worker, e aqui reagimos recarregando o iframe uma vez que o agente para.
+   */
+  useEffect(() => {
+    if (!ready || !autoReloadEnabled) return;
+    const timer = window.setTimeout(() => {
+      setEntries([]);
+      smokeErrors.current = [];
+      startSmoke();
+      reloadKey.current += 1;
+      setReloadNonce(reloadKey.current);
+    }, AUTO_RELOAD_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [ready, refreshToken, autoReloadEnabled, startSmoke]);
 
   const openExternal = (): void => {
     if (!frame.current?.contentWindow) return;
@@ -146,6 +268,47 @@ export function Preview({ refreshToken, onConsoleChange }: PreviewProps) {
         <div className="ml-2 min-w-0 flex-1 truncate rounded bg-muted/40 px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
           /__preview__/{entry ?? 'index.html'}
         </div>
+        {smoke && (
+          <span
+            title={smoke.message}
+            className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${
+              smoke.state === 'ok'
+                ? 'bg-emerald-500/15 text-emerald-400'
+                : smoke.state === 'failed'
+                  ? 'bg-destructive/20 text-destructive'
+                  : 'bg-muted text-muted-foreground'
+            }`}
+          >
+            {smoke.state === 'running' ? (
+              <>
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+                testando
+              </>
+            ) : smoke.state === 'ok' ? (
+              <>
+                <CheckCircle2 className="h-3 w-3" />
+                ok
+              </>
+            ) : (
+              <>
+                <AlertTriangle className="h-3 w-3" />
+                erro
+              </>
+            )}
+          </span>
+        )}
+        <ToggleBtn
+          active={autoReload}
+          onClick={() => onToggleAutoReload?.()}
+          title="Recarregar preview automaticamente quando um arquivo muda"
+          label="auto"
+        />
+        <ToggleBtn
+          active={smokeTest}
+          onClick={() => onToggleSmoke?.()}
+          title="Rodar verificacao de erro fatal a cada reload"
+          label="smoke"
+        />
         <button
           type="button"
           onClick={() => setConsoleOpen((v) => !v)}

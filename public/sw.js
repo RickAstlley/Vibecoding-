@@ -81,23 +81,14 @@ self.addEventListener('fetch', (event) => {
   for (const candidate of candidates) {
     const entry = cache.get(candidate);
     if (entry) {
-      event.respondWith(
-        new Response(entry.type.startsWith('text/') || TRANSFORMERS.includes(entry.type) ? rewrite(entry.content, url) : entry.content, {
-          status: 200,
-          headers: {
-            'content-type': entry.type,
-            'cache-control': 'no-store',
-            'access-control-allow-origin': '*',
-          },
-        }),
-      );
+      event.respondWith(respond(entry, url));
       return;
     }
   }
 
   const fallback = cache.get('index.html');
   if (fallback && (requested === '' || !requested.includes('.'))) {
-    event.respondWith(new Response(rewrite(fallback.content, url), { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }));
+    event.respondWith(respond(fallback, url));
     return;
   }
 
@@ -108,6 +99,53 @@ self.addEventListener('fetch', (event) => {
     }),
   );
 });
+
+function respond(entry, url) {
+  const isHtml = entry.type.startsWith('text/html');
+  const isText = isHtml || entry.type.startsWith('text/') || TRANSFORMERS.includes(entry.type);
+  const body = isHtml ? injectBridge(rewrite(entry.content, url)) : isText ? rewrite(entry.content, url) : entry.content;
+  return new Response(body, {
+    status: 200,
+    headers: { 'content-type': entry.type, 'cache-control': 'no-store', 'access-control-allow-origin': '*' },
+  });
+}
+
+/**
+ * Injeta um relay de console e erros no HTML servido, para que o painel do
+ * preview mostre o que a pagina loga. Como o iframe roda em sandbox sem
+ * allow-same-origin, o targetOrigin precisa ser '*'.
+ */
+function injectBridge(html) {
+  const script = `<script data-arcanum-bridge>(function(){
+  var post = function(level, text){ try { parent.postMessage({ type: 'console', level: level, text: String(text) }, '*'); } catch (e) {} };
+  var fmt = function(args){
+    var out = [];
+    for (var i = 0; i < args.length; i++) {
+      var a = args[i];
+      if (typeof a === 'string') { out.push(a); continue; }
+      if (a instanceof Error) { out.push(a.name + ': ' + a.message); continue; }
+      try { out.push(JSON.stringify(a)); } catch (e) { out.push(String(a)); }
+    }
+    return out.join(' ');
+  };
+  ['log','info','warn','error','debug'].forEach(function(level){
+    var orig = console[level];
+    console[level] = function(){ post(level, fmt(arguments)); orig.apply(console, arguments); };
+  });
+  window.addEventListener('error', function(e){
+    post('error', e.message + (e.filename ? ' (' + String(e.filename).split('/__preview__/').pop() + ':' + e.lineno + ')' : ''));
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    var r = e.reason;
+    post('error', 'Promise rejeitada sem tratamento: ' + (r && r.message ? r.message : String(r)));
+  });
+  parent.postMessage({ type: 'ready' }, '*');
+})();</script>`;
+
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head([^>]*)>/i, `<head$1>${script}`);
+  if (/<body[^>]*>/i.test(html)) return html.replace(/<body([^>]*)>/i, `<body$1>${script}`);
+  return script + html;
+}
 
 /**
  * Reescreve URLs absolutos (/styles.css, /src/main.tsx) para o namespace
