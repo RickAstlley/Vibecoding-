@@ -2,10 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  FileSearch,
   GitBranch,
   KeyRound,
   ListChecks,
   PanelLeftClose,
+  Plug,
+  Rocket,
   TerminalIcon,
   PanelLeftOpen,
   MessageSquare,
@@ -24,6 +27,9 @@ import { Preview, type ConsoleEntry, type SmokeState } from '@/components/previe
 import { Chat } from '@/components/chat/Chat';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
 import { WalkthroughPanel } from '@/components/agents/WalkthroughPanel';
+import { DeployPanel } from '@/components/deploy/DeployPanel';
+import { McpPanel } from '@/components/mcp/McpPanel';
+import { RagPanel } from '@/components/rag/RagPanel';
 import { SessionPanel } from '@/components/session/SessionPanel';
 import { TerminalPanel } from '@/components/terminal/TerminalPanel';
 import { GitPanel } from '@/components/git/GitPanel';
@@ -47,7 +53,7 @@ import { costOf, formatCost } from '@/lib/tokens';
 import { MODES } from '@/core/agents/modes';
 import { tryNormalizePath } from '@/core/vfs/paths';
 
-type SidePanel = 'chat' | 'preview' | 'settings' | 'session' | 'terminal' | 'git' | 'secrets' | 'review' | null;
+type SidePanel = 'chat' | 'preview' | 'settings' | 'session' | 'terminal' | 'git' | 'secrets' | 'review' | 'deploy' | 'mcp' | 'rag' | null;
 
 export default function WeaverPage() {
   const files = useFiles();
@@ -416,6 +422,9 @@ export default function WeaverPage() {
           onClick={() => switchPanel('session')}
           badge={tasks.length > 0 ? `${tasks.filter((t) => t.status === 'done').length}/${tasks.length}` : undefined}
         />
+        <PanelBtn icon={<FileSearch className="h-4 w-4" />} label="Buscar" active={sidePanel === 'rag'} onClick={() => switchPanel('rag')} />
+        <PanelBtn icon={<Plug className="h-4 w-4" />} label="MCP" active={sidePanel === 'mcp'} onClick={() => switchPanel('mcp')} />
+        <PanelBtn icon={<Rocket className="h-4 w-4" />} label="Publicar" active={sidePanel === 'deploy'} onClick={() => switchPanel('deploy')} />
         <PanelBtn
           icon={<ListChecks className="h-4 w-4" />}
           label="Revisar"
@@ -573,6 +582,16 @@ export default function WeaverPage() {
                   costUsd={ui.sessionCostUsd}
                   budgetUsd={settings.agent.sessionBudgetUsd}
                   onRestore={(label) => notify(label, 'info')}
+                />
+              ) : sidePanel === 'rag' ? (
+                <RagPanel />
+              ) : sidePanel === 'mcp' ? (
+                <McpPanel />
+              ) : sidePanel === 'deploy' ? (
+                <DeployPanel
+                  projectName={files.projectName}
+                  bundlerEnabled={settings.build.bundlerEnabled}
+                  onMessage={(message, kind) => notify(message, kind)}
                 />
               ) : sidePanel === 'review' ? (
                 <WalkthroughPanel
