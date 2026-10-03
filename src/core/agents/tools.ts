@@ -1,6 +1,7 @@
 import type { ToolDef } from '../ia/client';
 import type { AgentMode } from './modes';
 import { BROWSER_TOOLS, runBrowserTool, type BrowserToolsConfig } from '../browser/tools';
+import { EXEC_TOOL, INSTALL_TOOL, runRuntimeTool, type RuntimeToolContext } from '../runtime';
 
 export interface ToolResultPayload {
   ok: boolean;
@@ -67,6 +68,8 @@ const FINISH_SCHEMA = {
 
 export interface ToolOptions {
   browser?: BrowserToolsConfig;
+  /** Habilita run_command / install_dependencies. */
+  exec?: boolean;
 }
 
 export function toolsFor(
@@ -115,6 +118,10 @@ export function toolsFor(
     tools.push(...BROWSER_TOOLS);
   }
 
+  if (allow('run')) {
+    tools.push(EXEC_TOOL, INSTALL_TOOL);
+  }
+
   if (allow('finish')) {
     tools.push({
       name: 'finish',
@@ -136,6 +143,8 @@ export interface ToolExecutionContext {
   search(query: string, scope?: string, regex?: boolean): Promise<Array<{ path: string; line: number; text: string }>>;
   applyEdit(tool: string, args: Record<string, unknown>): Promise<ToolResultPayload>;
   browser?: BrowserToolsConfig;
+  /** Ponte para execucao de codigo. Ausente = ferramenta desabilitada. */
+  exec?: RuntimeToolContext;
 }
 
 export async function executeTool(
@@ -168,6 +177,12 @@ export async function executeTool(
     case 'edit_anchor':
     case 'write_file': {
       return ctx.applyEdit(name, args);
+    }
+    case 'run_command':
+    case 'install_dependencies': {
+      if (!ctx.exec) return { ok: false, summary: 'Execucao desativada neste projeto.' };
+      const r = await runRuntimeTool(name, args, ctx.exec);
+      return { ok: r.ok, summary: r.summary };
     }
     case 'browser_snapshot':
     case 'browser_query':

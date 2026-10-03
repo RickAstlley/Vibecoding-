@@ -9,6 +9,7 @@ import { createCheckpoint, decideApply, type Checkpoint, type FastApplyConfig } 
 import { checkpointStore } from '@/core/agents/checkpoint-store';
 import { loadRules, renderRules } from '@/core/agents/rules';
 import { mergeTasks, parseTasks, type Task } from '@/core/agents/tasks';
+import type { RuntimeToolContext } from '@/core/runtime';
 import type { ContextFileReport } from '@/core/context/builder';
 import type { ChatMessage } from '@/core/ia/client';
 import type { ToolExecutionContext } from '@/core/agents/tools';
@@ -41,6 +42,9 @@ export interface AppDeps {
   sessionCostUsd?: number;
   browserTools?: { enabled: boolean; timeoutMs: number };
   browserTimeoutMs?: number;
+  /** Ponte para execucao de codigo. Ausente = run_command desabilitado. */
+  exec?: RuntimeToolContext;
+  runtimeInstructions?: string;
 }
 
 async function searchCode(query: string, scope?: string, useRegex = false): Promise<Array<{ path: string; line: number; text: string }>> {
@@ -141,6 +145,8 @@ export function createRuntime(deps: AppDeps): AgentRuntime {
   return new AgentRuntime({
     ...toolCtx,
     browserTools: deps.browserTools ?? { enabled: true, timeoutMs: deps.browserTimeoutMs ?? 8000 },
+    exec: deps.exec,
+    runtimeInstructions: deps.runtimeInstructions,
     onStepText: async (text: string, runId: string): Promise<void> => {
       const parsed = parseTasks(text, runId);
       if (parsed.length > 0) {

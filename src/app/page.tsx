@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ListChecks,
   PanelLeftClose,
+  TerminalIcon,
   PanelLeftOpen,
   MessageSquare,
   Bot,
@@ -21,6 +22,8 @@ import { Preview, type ConsoleEntry, type SmokeState } from '@/components/previe
 import { Chat } from '@/components/chat/Chat';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
 import { SessionPanel } from '@/components/session/SessionPanel';
+import { TerminalPanel } from '@/components/terminal/TerminalPanel';
+import { RUNTIME_INSTRUCTIONS, type RuntimeConfig } from '@/core/runtime';
 import { mergeTasks, parseTasks, type Task } from '@/core/agents/tasks';
 import type { Checkpoint } from '@/core/agents/fast-apply';
 import { checkpointStore } from '@/core/agents/checkpoint-store';
@@ -31,13 +34,14 @@ import { vfs } from '@/core/vfs/vfs';
 import { detectLanguage } from '@/core/vfs/file';
 import { createZip, extractZip, isZipFile } from '@/core/zip/unzip';
 import { createRuntime, newRunId } from '@/lib/runtime';
+import { createRuntime as createCodeRuntime, type RuntimeToolContext } from '@/core/runtime';
 import { AgentRuntime } from '@/core/agents/runtime';
 import { contextWindow } from '@/core/ia/providers';
 import { costOf, formatCost } from '@/lib/tokens';
 import { MODES } from '@/core/agents/modes';
 import { tryNormalizePath } from '@/core/vfs/paths';
 
-type SidePanel = 'chat' | 'preview' | 'settings' | 'session' | null;
+type SidePanel = 'chat' | 'preview' | 'settings' | 'session' | 'terminal' | null;
 
 export default function WeaverPage() {
   const files = useFiles();
@@ -55,8 +59,33 @@ export default function WeaverPage() {
   const [smokeResult, setSmokeResult] = useState<SmokeState | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
+
   const runtimeRef = useRef<AgentRuntime | null>(null);
   const approvalResolvers = useRef(new Map<string, (ok: boolean) => void>());
+
+  const runtimeConfig: RuntimeConfig = useMemo(
+    () => ({
+      kind: settings.runtime.kind,
+      remote: { baseUrl: settings.runtime.remoteBaseUrl, token: settings.runtime.remoteToken, timeoutMs: settings.runtime.timeoutMs },
+      local: { timeoutMs: settings.runtime.timeoutMs },
+    }),
+    [settings.runtime],
+  );
+
+  const runtimeCtx = useMemo<RuntimeToolContext | undefined>(() => {
+    if (settings.runtime.kind === 'none') return undefined;
+    const adapter = createCodeRuntime(runtimeConfig);
+    return {
+      exec: async (command, timeoutMs) => {
+        const r = await adapter.exec({ command, language: 'auto', ...(timeoutMs ? { timeoutMs } : {}) });
+        return { ok: r.ok, stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, ...(r.error ? { error: r.error } : {}) };
+      },
+      install: async () => {
+        const r = await adapter.install();
+        return { ok: r.ok, stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, ...(r.error ? { error: r.error } : {}) };
+      },
+    };
+  }, [runtimeConfig, settings.runtime.kind]);
 
   const activeContent = files.activePath ? (files.contents[files.activePath] ?? '') : '';
   const activeLanguage = files.activePath ? detectLanguage(files.activePath) : ('text' as const);
@@ -245,6 +274,8 @@ export default function WeaverPage() {
       },
       useProjectRules: settings.agent.useProjectRules,
       browserTools: { enabled: settings.agent.browserTools, timeoutMs: 8000 },
+      exec: runtimeCtx,
+      runtimeInstructions: runtimeCtx ? RUNTIME_INSTRUCTIONS : '',
       sessionCostUsd: ui.sessionCostUsd,
       onApproval: async (path, reason) => {
         return new Promise<boolean>((resolve) => {
@@ -308,7 +339,7 @@ export default function WeaverPage() {
       approvalResolvers.current.clear();
       setProgress((p) => ({ ...p, running: false }));
     }
-  }, [canSend, files, notify, progress.running, settings, ui]);
+  }, [canSend, files, notify, progress.running, runtimeCtx, settings, ui]);
 
   const stop = useCallback(() => {
     runtimeRef.current?.abort();
@@ -369,6 +400,12 @@ export default function WeaverPage() {
           active={sidePanel === 'session'}
           onClick={() => switchPanel('session')}
           badge={tasks.length > 0 ? `${tasks.filter((t) => t.status === 'done').length}/${tasks.length}` : undefined}
+        />
+        <PanelBtn
+          icon={<TerminalIcon className="h-4 w-4" />}
+          label="Terminal"
+          active={sidePanel === 'terminal'}
+          onClick={() => switchPanel('terminal')}
         />
         <PanelBtn icon={<Eye className="h-4 w-4" />} label="Preview" active={sidePanel === 'preview'} onClick={() => switchPanel('preview')} />
         <PanelBtn icon={<SettingsIcon className="h-4 w-4" />} label="Config" active={sidePanel === 'settings'} onClick={() => switchPanel('settings')} />
@@ -503,6 +540,11 @@ export default function WeaverPage() {
                   costUsd={ui.sessionCostUsd}
                   budgetUsd={settings.agent.sessionBudgetUsd}
                   onRestore={(label) => notify(label, 'info')}
+                />
+              ) : sidePanel === 'terminal' ? (
+                <TerminalPanel
+                  config={runtimeConfig}
+                  files={files.flatPaths.map((p) => ({ path: p, content: files.contents[p] ?? '' })).filter((f) => f.content !== '')}
                 />
               ) : sidePanel === 'preview' ? (
                 <Preview

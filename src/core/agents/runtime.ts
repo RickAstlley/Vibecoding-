@@ -85,6 +85,10 @@ export class AgentRuntime {
       extraSystem?(): Promise<string>;
       /** Habilita as ferramentas browser_* (ver preview). */
       browserTools?: { enabled: boolean; timeoutMs: number };
+      /** Ponte para execucao de codigo (run_command). */
+      exec?: import('../runtime').RuntimeToolContext;
+      /** Instrucoes extras quando ha execucao disponivel. */
+      runtimeInstructions?: string;
     },
     private readonly jrnl: Journal = journal(),
   ) {}
@@ -134,10 +138,14 @@ export class AgentRuntime {
       SYSTEM_PREAMBLE,
       config.systemPrompt ?? mode.systemPrompt,
       projectRules ? `## Instrucoes do projeto\n${projectRules}` : '',
+      this.ctx.runtimeInstructions ?? '',
     ]
       .filter(Boolean)
       .join('\n\n');
-    const tools: ToolDef[] = toolsFor(mode.id, mode.toolset, { browser: this.ctx.browserTools });
+    const tools: ToolDef[] = toolsFor(mode.id, mode.toolset, {
+      browser: this.ctx.browserTools,
+      exec: this.ctx.exec !== undefined,
+    });
     const messages: ChatMessage[] = [
       ...(config.history ?? []),
       { role: 'user', content: config.goal },

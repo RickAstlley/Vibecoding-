@@ -49,3 +49,21 @@ DirectoryIndex index.html
   Header set X-Frame-Options "SAMEORIGIN"
   Header set Referrer-Policy "strict-origin-when-cross-origin"
 </IfModule>
+
+# ---------------------------------------------------------------- Runtime local
+# O WebContainer (Node em WASM dentro da aba) exige SharedArrayBuffer, que so
+# existe com isolamento de origem. Estes cabecalhos sao obrigatorios.
+#
+# ATENCAO: `require-corp` bloqueia recursos de terceiros sem CORP. As CDNs
+# usadas pelo app (esm.sh, webcontainers.io) atendem, mas se voce apontar o
+# preview para um asset externo sem CORP, ele nao carrega.
+<IfModule mod_headers.c>
+  Header set Cross-Origin-Opener-Policy "same-origin"
+  Header set Cross-Origin-Embedder-Policy "require-corp"
+  Header set Cross-Origin-Resource-Policy "cross-origin"
+</IfModule>
+
+# Se a API local de IA for usada junto com o runtime, libere COEP credencial.
+# <IfModule mod_headers.c>
+#   Header set Cross-Origin-Embedder-Policy "credentialless"
+# </IfModule>

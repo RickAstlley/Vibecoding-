@@ -44,6 +44,12 @@ interface SettingsState {
     /** Busca pacotes na CDN quando nao ha node_modules no ZIP. */
     cdnFallback: boolean;
   };
+  runtime: {
+    kind: 'none' | 'local' | 'remote';
+    remoteBaseUrl: string;
+    remoteToken: string;
+    timeoutMs: number;
+  };
   editor: { fontSize: number; tabSize: number; wordWrap: boolean; minimap: boolean };
   setApiKey: (providerId: string, key: string) => void;
   setBaseUrl: (providerId: string, url: string) => void;
@@ -54,6 +60,7 @@ interface SettingsState {
   setAgent: (patch: Partial<SettingsState['agent']>) => void;
   setEditor: (patch: Partial<SettingsState['editor']>) => void;
   setBuild: (patch: Partial<SettingsState['build']>) => void;
+  setRuntime: (patch: Partial<SettingsState['runtime']>) => void;
   resetKeys: () => void;
 }
 
@@ -83,6 +90,7 @@ export const useSettings = create<SettingsState>()(
         browserTools: true,
       },
       build: { bundlerEnabled: true, cdnFallback: true },
+      runtime: { kind: 'none', remoteBaseUrl: '', remoteToken: '', timeoutMs: 60000 },
       editor: { fontSize: 13, tabSize: 2, wordWrap: false, minimap: false },
       setApiKey: (providerId, key) =>
         set((s) => {
@@ -102,6 +110,7 @@ export const useSettings = create<SettingsState>()(
       setAgent: (patch) => set((s) => ({ agent: { ...s.agent, ...patch } })),
       setEditor: (patch) => set((s) => ({ editor: { ...s.editor, ...patch } })),
       setBuild: (patch) => set((s) => ({ build: { ...s.build, ...patch } })),
+      setRuntime: (patch) => set((s) => ({ runtime: { ...s.runtime, ...patch } })),
       resetKeys: () => set({ providers: defaultProviders() }),
     }),
     {
@@ -115,6 +124,7 @@ export const useSettings = create<SettingsState>()(
         agent: s.agent,
         editor: s.editor,
         build: s.build,
+        runtime: s.runtime,
       }),
     },
   ),
