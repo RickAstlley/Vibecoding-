@@ -1,0 +1,20 @@
+{
+  "name": "Arcanum Weaver",
+  "short_name": "Arcanum",
+  "description": "IDE de vibecoding com edicao cirurgica, leitura de ZIP, preview e agentes com ping continuo",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d0f16",
+  "theme_color": "#0d0f16",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

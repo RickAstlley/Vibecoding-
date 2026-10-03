@@ -1,0 +1,74 @@
+import Dexie, { type Table } from 'dexie';
+import type { Snapshot, VDir, VFile } from '@/types/vfs';
+
+export interface ChatMessageRow {
+  id: string;
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  createdAt: number;
+  runId: string | null;
+  tokensIn: number;
+  tokensOut: number;
+  compression: string | null;
+  toolCalls: string | null;
+}
+
+export interface JournalRow {
+  seq: number;
+  runId: string;
+  type: string;
+  payload: string;
+  prevHash: string;
+  hash: string;
+  ts: number;
+}
+
+export interface ProjectRow {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  root: string;
+}
+
+export interface KvRow {
+  key: string;
+  value: unknown;
+}
+
+export class WeaverDatabase extends Dexie {
+  files!: Table<VFile, string>;
+  dirs!: Table<VDir, string>;
+  snapshots!: Table<Snapshot, string>;
+  messages!: Table<ChatMessageRow, string>;
+  journal!: Table<JournalRow, number>;
+  projects!: Table<ProjectRow, string>;
+  kv!: Table<KvRow, string>;
+
+  constructor(name = 'arcanum-weaver') {
+    super(name);
+    this.version(1).stores({
+      files: '&path, hash, updatedAt, encoding, size',
+      dirs: '&path, updatedAt',
+      snapshots: '&id, path, version, createdAt, [path+version], patchId',
+      messages: '&id, createdAt, runId, role',
+      journal: '&[runId+seq], runId, ts, type, hash',
+      projects: '&id, updatedAt',
+      kv: '&key',
+    });
+  }
+}
+
+let instance: WeaverDatabase | null = null;
+
+export function db(): WeaverDatabase {
+  if (typeof indexedDB === 'undefined') {
+    throw new Error('IndexedDB indisponivel neste ambiente');
+  }
+  if (!instance) instance = new WeaverDatabase();
+  return instance;
+}
+
+export function isDbAvailable(): boolean {
+  return typeof indexedDB !== 'undefined';
+}
