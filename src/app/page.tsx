@@ -23,6 +23,7 @@ import { CodeEditor } from '@/components/editor/CodeEditor';
 import { Preview, type ConsoleEntry, type SmokeState } from '@/components/preview/Preview';
 import { Chat } from '@/components/chat/Chat';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
+import { WalkthroughPanel } from '@/components/agents/WalkthroughPanel';
 import { SessionPanel } from '@/components/session/SessionPanel';
 import { TerminalPanel } from '@/components/terminal/TerminalPanel';
 import { GitPanel } from '@/components/git/GitPanel';
@@ -46,7 +47,7 @@ import { costOf, formatCost } from '@/lib/tokens';
 import { MODES } from '@/core/agents/modes';
 import { tryNormalizePath } from '@/core/vfs/paths';
 
-type SidePanel = 'chat' | 'preview' | 'settings' | 'session' | 'terminal' | 'git' | 'secrets' | null;
+type SidePanel = 'chat' | 'preview' | 'settings' | 'session' | 'terminal' | 'git' | 'secrets' | 'review' | null;
 
 export default function WeaverPage() {
   const files = useFiles();
@@ -416,6 +417,12 @@ export default function WeaverPage() {
           badge={tasks.length > 0 ? `${tasks.filter((t) => t.status === 'done').length}/${tasks.length}` : undefined}
         />
         <PanelBtn
+          icon={<ListChecks className="h-4 w-4" />}
+          label="Revisar"
+          active={sidePanel === 'review'}
+          onClick={() => switchPanel('review')}
+        />
+        <PanelBtn
           icon={<KeyRound className="h-4 w-4" />}
           label="Segredos"
           active={sidePanel === 'secrets'}
@@ -566,6 +573,11 @@ export default function WeaverPage() {
                   costUsd={ui.sessionCostUsd}
                   budgetUsd={settings.agent.sessionBudgetUsd}
                   onRestore={(label) => notify(label, 'info')}
+                />
+              ) : sidePanel === 'review' ? (
+                <WalkthroughPanel
+                  onMessage={(message, kind) => notify(message, kind)}
+                  onClose={() => switchPanel('review')}
                 />
               ) : sidePanel === 'secrets' ? (
                 <SecretsPanel onMessage={(message, kind) => notify(message, kind)} />
