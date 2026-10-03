@@ -30,6 +30,7 @@ import { WalkthroughPanel } from '@/components/agents/WalkthroughPanel';
 import { DeployPanel } from '@/components/deploy/DeployPanel';
 import { McpPanel } from '@/components/mcp/McpPanel';
 import { RagPanel } from '@/components/rag/RagPanel';
+import { installTestHooks } from '@/lib/testHooks';
 import { SessionPanel } from '@/components/session/SessionPanel';
 import { TerminalPanel } from '@/components/terminal/TerminalPanel';
 import { GitPanel } from '@/components/git/GitPanel';
@@ -104,6 +105,10 @@ export default function WeaverPage() {
 
   const lastPatch = ui.messages.filter((m) => m.patch).at(-1)?.patch;
   const highlightLines = useMemo(() => lastPatch?.changedLines ?? [], [lastPatch]);
+
+  useEffect(() => {
+    installTestHooks();
+  }, []);
 
   useEffect(() => {
     (async () => {

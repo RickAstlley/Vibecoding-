@@ -150,8 +150,11 @@ export async function buildBundle(input: BundleInput): Promise<BundleResult> {
       }
     }
 
+    // os valores precisam de toServed: um caminho cru como
+    // "node_modules/react/index.js" nao e specifier valido e o import map
+    // nao resolve.
     const aliasMap: Record<string, string> = {};
-    for (const [spec, target] of specifierMap) aliasMap[spec] = target;
+    for (const [spec, target] of specifierMap) aliasMap[spec] = toServed(target);
     served.set(path, {
       path,
       bytes: new TextEncoder().encode(rewriteImports(code, aliasMap)),

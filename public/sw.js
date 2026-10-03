@@ -104,14 +104,33 @@ self.addEventListener('fetch', (event) => {
   if (!url.pathname.startsWith('/__preview__/')) return;
 
   if (url.pathname === BRIDGE_PATH) {
-    event.respondWith(fetch('/preview-bridge.js').then((r) => new Response(r.text, {
-      status: 200,
-      headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' },
-    })));
+    // r.text() e nao r.text: passar o metodo faz o Response serializar a
+    // propria funcao ("function text() { [native code] }") e o preview
+    // quebrava com "Unexpected identifier 'code'".
+    event.respondWith(
+      fetch('/preview-bridge.js').then((r) =>
+        r.text().then(
+          (body) =>
+            new Response(body, {
+              status: 200,
+              headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' },
+            }),
+        ),
+      ),
+    );
     return;
   }
 
-  const requested = decodeURIComponent(url.pathname.slice('/__preview__/'.length)) || 'index.html';
+  let requested = decodeURIComponent(url.pathname.slice('/__preview__/'.length)) || 'index.html';
+
+  // URLs emitidas pelo bundler carregam o prefixo __arcanum_; o cache usa o
+  // caminho original do projeto, entao o prefixo tem de sair aqui.
+  const BUILTIN = '__arcanum_';
+  if (requested.startsWith(BUILTIN)) {
+    requested = requested.slice(BUILTIN.length);
+    if (!requested) requested = 'index.html';
+  }
+
   const candidates = [requested, requested.endsWith('/') ? `${requested}index.html` : requested];
   if (requested === '/' || requested === '') candidates.unshift('index.html');
 
@@ -164,10 +183,13 @@ function injectBridge(html) {
  * do preview, para que o Service Worker consiga interceptar tudo.
  */
 function rewrite(html) {
+  // URLs que ja apontam para o preview nao recebem o prefixo de novo, senao
+  // viram /__preview__/__preview__/__arcanum_...
+  const already = '(?!(?:\\/|__preview__\\/))';
   let out = html;
-  out = out.replace(/(\s(?:src|href)\s*=\s*["'])\/(?!\/)/g, `$1/__preview__/`);
-  out = out.replace(/(from\s+['"])\/(?!\/)/g, '$1/__preview__/');
-  out = out.replace(/import\(\s*['"]\/(?!\/)/g, 'import("/__preview__/');
-  out = out.replace(/new\s+Worker\(\s*['"]\/(?!\/)/g, `new Worker("/__preview__/`);
+  out = out.replace(new RegExp(`(\\s(?:src|href)\\s*=\\s*["'])\\/${already}`, 'g'), '$1/__preview__/');
+  out = out.replace(new RegExp(`(from\\s+['"])\\/${already}`, 'g'), '$1/__preview__/');
+  out = out.replace(new RegExp(`import\\(\\s*['"]\\/${already}`, 'g'), 'import("/__preview__/');
+  out = out.replace(new RegExp(`new\\s+Worker\\(\\s*['"]\\/${already}`, 'g'), 'new Worker("/__preview__/');
   return out;
 }

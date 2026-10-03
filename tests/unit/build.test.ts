@@ -176,9 +176,15 @@ describe('transform - JSX', () => {
     expect(out).toContain('React.createElement("div", null, "oi")');
   });
 
-  it('converte elemento com atributo string', () => {
+  it('converte elemento com atributo string no config', () => {
     const out = transformJsx('const a = <div className="x">oi</div>;', { extension: '.tsx' });
-    expect(out).toContain('"className": "x"');
+    expect(out).toContain('React.createElement("div", { "className": "x" }, "oi")');
+  });
+
+  it('props e o segundo argumento, nunca um filho', () => {
+    // props depois do null viravam filho e o atributo sumia do elemento
+    const out = transformJsx('const a = <div className="x">oi</div>;', { extension: '.tsx' });
+    expect(out).not.toContain('null, { "className"');
   });
 
   it('converte expressao em filho', () => {
@@ -194,7 +200,8 @@ describe('transform - JSX', () => {
 
   it('converte componente com nome maiusculo', () => {
     const out = transformJsx('const a = <Card title="x" />;', { extension: '.tsx' });
-    expect(out).toContain('React.createElement(Card, null, { "title": "x" })');
+    // config e o segundo argumento; os filhos vem depois
+    expect(out).toContain('React.createElement(Card, { "title": "x" })');
   });
 
   it('trata elemento HTML como string e componente como identificador', () => {
@@ -248,7 +255,7 @@ describe('transform - JSX', () => {
     const src = 'const a = <ul><li><a href="/x">link</a></li></ul>;';
     const out = transformJsx(src, { extension: '.tsx' });
     expect(out).toContain('React.createElement("ul", null,');
-    expect(out).toContain('React.createElement("a", null, { "href": "/x" }, "link")');
+    expect(out).toContain('React.createElement("a", { "href": "/x" }, "link")');
   });
 });
 
@@ -280,24 +287,54 @@ describe('transform - pipeline', () => {
 });
 
 describe('transform - jsx runtime', () => {
-  it('injeta import do jsx-runtime no modo automatico', () => {
-    const out = ensureJsxRuntime('const a = 1;', { extension: '.tsx' });
-    expect(out).toContain('react/jsx-runtime');
+  it('injeta React, que e o que createElement exige em runtime', () => {
+    // o import de react/jsx-runtime nao define `React` e o preview quebrava
+    // com "React is not defined"
+    expect(ensureJsxRuntime('const a = 1;', { extension: '.tsx' })).toContain("import React from 'react'");
   });
 
-  it('injeta React no modo classico', () => {
-    const out = ensureJsxRuntime('const a = 1;', { extension: '.tsx', jsxAutomatic: false });
-    expect(out).toContain("import React from 'react'");
+  it('declara _Fragment quando o codigo usa fragmento', () => {
+    const out = ensureJsxRuntime('const a = React.createElement(_Fragment, null);', { extension: '.tsx' });
+    expect(out).toContain('Fragment as _Fragment');
   });
 
   it('nao duplica se ja importa React', () => {
     const src = "import React from 'react';\nconst a = 1;";
-    const out = ensureJsxRuntime(src, { extension: '.tsx', jsxAutomatic: false });
-    expect(out.match(/import React/g)).toHaveLength(1);
+    const out = ensureJsxRuntime(src, { extension: '.tsx' });
+    expect(out.match(/import React from/g)).toHaveLength(1);
   });
 
   it('nao mexe em .ts', () => {
     expect(ensureJsxRuntime('const a = 1;', { extension: '.ts' })).toBe('const a = 1;');
+  });
+
+  it('o arquivo transformado declara React antes de usar', () => {
+    const out = ensureJsxRuntime(transform('export const A = () => <div>oi</div>;', { extension: '.tsx' }), {
+      extension: '.tsx',
+    });
+    expect(out.indexOf("import React from 'react'")).toBeLessThan(out.indexOf('React.createElement'));
+  });
+});
+
+describe('transform - ternario vs anotacao de tipo', () => {
+  it('nao come a perna do ternario dentro de chamada', () => {
+    const src = 'el.setAttribute(k === "className" ? "class" : k, String(v));';
+    expect(stripTypes(src, '.js')).toBe(src);
+  });
+
+  it('preserva ternario com valor composto', () => {
+    const src = 'const x = a ? b : c;';
+    expect(stripTypes(src, '.ts')).toBe(src);
+  });
+
+  it('ainda remove anotacao quando ha ternario na mesma funcao', () => {
+    const out = stripTypes('function f(x: string) { return x ? 1 : 2; }', '.ts');
+    expect(out).toContain('function f(x) {');
+    expect(out).toContain('x ? 1 : 2');
+  });
+
+  it('trata marcador opcional como nao-ternario', () => {
+    expect(stripTypes('function f(a?: string) {}', '.ts')).toContain('function f(a)');
   });
 });
 

@@ -89,6 +89,10 @@ export function Preview({
   const [fatal, setFatal] = useState<string | null>(
     typeof navigator !== 'undefined' && !('serviceWorker' in navigator) ? 'Service Worker indisponivel neste navegador' : null,
   );
+  // Incrementa quando o VFS terminou de ser enviado ao Service Worker.
+  // O auto-reload depende deste e nao do refreshToken: recarregar antes da
+  // sincronizacao deixava o iframe pegando 404 para sempre no primeiro acesso.
+  const [syncToken, setSyncToken] = useState(0);
   const [smoke, setSmoke] = useState<SmokeState | null>(() =>
     smokeTest && entry ? { state: 'running', message: 'Verificando preview...' } : null,
   );
@@ -285,11 +289,10 @@ export function Preview({
   };
 
   /**
-   * Auto-reload com debounce: cada patch/save renova o cache do Service
-   * Worker, e aqui reagimos recarregando o iframe uma vez que o agente para.
+   * Auto-reload com debounce, disparado so depois que a sincronizacao terminou.
    */
   useEffect(() => {
-    if (!ready || !autoReloadEnabled) return;
+    if (!ready || !autoReloadEnabled || syncToken === 0) return;
     const timer = window.setTimeout(() => {
       setEntries([]);
       smokeErrors.current = [];
@@ -298,7 +301,7 @@ export function Preview({
       setReloadNonce(reloadKey.current);
     }, AUTO_RELOAD_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [ready, refreshToken, autoReloadEnabled, startSmoke]);
+  }, [ready, syncToken, autoReloadEnabled, startSmoke]);
 
   const openExternal = (): void => {
     if (!frame.current?.contentWindow) return;
@@ -307,6 +310,16 @@ export function Preview({
   };
 
   const width = WIDTHS[viewport];
+
+  /*
+   * `allow-same-origin` e obrigatorio: sem ele o iframe tem origem opaca e o
+   * Service Worker nao o controla, entao o preview fica sempre em 404.
+   *
+   * Consequencia: o codigo do preview roda na mesma origem do IDE e pode ler
+   * o localStorage, onde ficam as chaves de API. Mitigacao: a opcao
+   * "lembrar chaves" nas configuracoes deixa a chave apenas na memoria da aba.
+   */
+  const sandboxTokens = 'allow-scripts allow-modals allow-forms allow-popups allow-same-origin';
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -397,7 +410,7 @@ export function Preview({
           title="Preview do site"
           data-testid="preview-frame"
           src={`/__preview__/index.html?r=${reloadNonce}`}
-          sandbox="allow-scripts allow-modals allow-forms allow-popups"
+          sandbox={sandboxTokens}
           className="mx-auto h-full rounded-md border border-border bg-white shadow-lg"
           style={{ width: width ? `${width}px` : '100%', maxWidth: '100%' }}
         />

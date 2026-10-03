@@ -44,6 +44,7 @@ interface SettingsState {
     /** Busca pacotes na CDN quando nao ha node_modules no ZIP. */
     cdnFallback: boolean;
   };
+  rememberKeys: boolean;
   runtime: {
     kind: 'none' | 'local' | 'remote';
     remoteBaseUrl: string;
@@ -90,6 +91,7 @@ export const useSettings = create<SettingsState>()(
         browserTools: true,
       },
       build: { bundlerEnabled: true, cdnFallback: true },
+      rememberKeys: true,
       runtime: { kind: 'none', remoteBaseUrl: '', remoteToken: '', timeoutMs: 60000 },
       editor: { fontSize: 13, tabSize: 2, wordWrap: false, minimap: false },
       setApiKey: (providerId, key) =>
@@ -111,12 +113,17 @@ export const useSettings = create<SettingsState>()(
       setEditor: (patch) => set((s) => ({ editor: { ...s.editor, ...patch } })),
       setBuild: (patch) => set((s) => ({ build: { ...s.build, ...patch } })),
       setRuntime: (patch) => set((s) => ({ runtime: { ...s.runtime, ...patch } })),
+      setRememberKeys: (rememberKeys: boolean) => set({ rememberKeys }),
       resetKeys: () => set({ providers: defaultProviders() }),
     }),
     {
       name: 'arcanum-weaver-settings',
       partialize: (s) => ({
-        providers: s.providers,
+        // com "lembrar chaves" desligado, a chave vive so na memoria da aba:
+        // o preview roda na mesma origem e nao alcanca o localStorage
+        providers: s.rememberKeys
+          ? s.providers
+          : Object.fromEntries(Object.entries(s.providers).map(([id, p]) => [id, { ...p, apiKey: '' }])),
         activeProvider: s.activeProvider,
         activeModel: s.activeModel,
         routing: s.routing,

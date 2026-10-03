@@ -52,9 +52,25 @@ function stripParamTypes(src: string): string {
   let i = 0;
   const n = src.length;
   const stack: Array<'brace' | 'paren' | 'bracket'> = [];
+  // Um ':' depois de '?' e operador ternario, nao anotacao de tipo. Sem
+  // isto, `f(c ? "a" : b)` virava `f(c ? "a" , b)`.
+  let ternary = false;
 
   while (i < n) {
     const ch = src[i] as string;
+
+    if (ch === '?' && stack[stack.length - 1] === 'paren') {
+      const next = src[i + 1];
+      // `a?: T`, `a?)`, `a?,` sao marcador opcional, nao ternario
+      ternary = next !== ':' && next !== ')' && next !== ',' && next !== '.' && next !== '(';
+      out += ch;
+      i++;
+      continue;
+    }
+
+    if ((ch === ',' || ch === ';') && stack[stack.length - 1] === 'paren') {
+      ternary = false;
+    }
 
     if (ch === '"' || ch === "'" || ch === '`') {
       const q = ch;
@@ -103,6 +119,12 @@ function stripParamTypes(src: string): string {
     }
 
     if (ch === ':' && stack[stack.length - 1] === 'paren') {
+      if (ternary) {
+        ternary = false;
+        out += ch;
+        i++;
+        continue;
+      }
       const end = typeRun(src, i + 1);
       const raw = src.slice(i + 1, end).trim();
       const candidate = raw.replace(/\s*=.*$/, '').trim();
@@ -419,15 +441,17 @@ function parseElement(src: string, start: number, factory: string, file: string)
     i = j;
   }
 
-  const propsExpr = props.length > 0 ? `, { ${props.join(', ')} }` : '';
+  // assinatura de createElement: (tipo, config, ...filhos).
+  // Props passadas depois do null viravam filho e o atributo sumia.
+  const config = props.length > 0 ? `{ ${props.join(', ')} }` : 'null';
 
   if (selfClosing) {
-    return { code: `${factory}(${tagName}, null${propsExpr})`, next: i };
+    return { code: `${factory}(${tagName}, ${config})`, next: i };
   }
 
   const children = parseChildren(src, i, factory, file);
   if (!children) return null;
-  return { code: `${factory}(${tagName}, null${propsExpr}${children.props})`, next: children.next };
+  return { code: `${factory}(${tagName}, ${config}${children.props})`, next: children.next };
 }
 
 /** Converte JSX para chamadas de createElement. */
@@ -509,13 +533,16 @@ export function transform(source: string, options: TransformOptions): string {
 export function ensureJsxRuntime(code: string, options: TransformOptions): string {
   if (options.extension !== '.tsx' && options.extension !== '.jsx') return code;
 
-  if (options.jsxAutomatic === false) {
-    if (/import\s+React\b/.test(code)) return code;
-    return `import React from 'react';\n${code}`;
+  const prelude: string[] = [];
+
+  if (!/import\s+React\s+from/.test(code)) {
+    prelude.push(`import React from 'react';`);
+  }
+  if (/_Fragment\b/.test(code) && !/Fragment as _Fragment/.test(code)) {
+    prelude.push(`import { Fragment as _Fragment } from 'react';`);
   }
 
-  if (/react\/jsx-(dev-)?runtime/.test(code)) return code;
-  return `import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";\n${code}`;
+  return prelude.length > 0 ? `${prelude.join('\n')}\n${code}` : code;
 }
 
 /** Reescreve imports para os caminhos servidos. */
