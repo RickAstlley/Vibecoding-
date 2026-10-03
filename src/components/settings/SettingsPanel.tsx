@@ -1,0 +1,238 @@
+'use client';
+
+import { useState } from 'react';
+import { Key, Eye, EyeOff, RefreshCw, Server, Trash2, Check, Zap, ShieldAlert } from 'lucide-react';
+import { PROVIDERS, getProvider } from '@/core/ia/providers';
+import { useSettings } from '@/stores/settings';
+
+export function SettingsPanel() {
+  const settings = useSettings();
+  const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
+  const [testing, setTesting] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<Record<string, string>>({});
+
+  const test = async (providerId: string): Promise<void> => {
+    const provider = getProvider(providerId);
+    const cfg = settings.providers[providerId];
+    if (!provider || !cfg) return;
+    setTesting(providerId);
+    setTestResult((r) => ({ ...r, [providerId]: '' }));
+    try {
+      const url = `${(cfg.baseUrl || provider.baseUrl).replace(/\/$/, '')}/models`;
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      if (provider.kind === 'anthropic') {
+        headers['x-api-key'] = cfg.apiKey;
+        headers['anthropic-version'] = '2023-06-01';
+      } else if (provider.kind === 'google') {
+        headers['x-goog-api-key'] = cfg.apiKey;
+      } else if (cfg.apiKey && cfg.apiKey !== 'ollama' && cfg.apiKey !== 'lm-studio') {
+        headers.authorization = `Bearer ${cfg.apiKey}`;
+      }
+      const res = await fetch(url, { headers });
+      if (res.ok) {
+        setTestResult((r) => ({ ...r, [providerId]: 'OK - endpoint respondeu' }));
+      } else {
+        const body = await res.text().catch(() => '');
+        setTestResult((r) => ({ ...r, [providerId]: `HTTP ${res.status}: ${body.slice(0, 120)}` }));
+      }
+    } catch (e) {
+      setTestResult((r) => ({ ...r, [providerId]: `Falha de rede: ${e instanceof Error ? e.message : String(e)}` }));
+    } finally {
+      setTesting(null);
+    }
+  };
+
+  return (
+    <div className="scrollbar-thin h-full overflow-auto p-3">
+      <div className="mb-4">
+        <h3 className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
+          <Key className="h-4 w-4 text-arc" />
+          Provedores e chaves (BYOK)
+        </h3>
+        <p className="text-[11px] text-muted-foreground">
+          As chaves ficam no seu navegador (localStorage). Nenhum dado e enviado a servidores nossos.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        {PROVIDERS.map((provider) => {
+          const cfg = settings.providers[provider.id] ?? { apiKey: '', baseUrl: provider.baseUrl, enabled: false };
+          const isActive = settings.activeProvider === provider.id;
+          const visible = showKeys[provider.id] ?? false;
+          const result = testResult[provider.id];
+
+          return (
+            <div
+              key={provider.id}
+              className={`rounded-lg border p-3 transition-colors ${
+                isActive ? 'border-arc/60 bg-arc/5' : 'border-border bg-card/40'
+              }`}
+            >
+              <div className="mb-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => settings.setActiveProvider(provider.id)}
+                  className={`flex items-center gap-1.5 text-sm font-medium ${isActive ? 'text-arc' : ''}`}
+                >
+                  {isActive && <Check className="h-3.5 w-3.5" />}
+                  {provider.label}
+                  {provider.featured && (
+                    <span className="rounded bg-arc/20 px-1 py-0.5 text-[9px] uppercase text-arc-fg">principal</span>
+                  )}
+                </button>
+                {provider.docsUrl && (
+                  <a
+                    href={provider.docsUrl}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="ml-auto text-[10px] text-muted-foreground underline hover:text-foreground"
+                  >
+                    obter chave
+                  </a>
+                )}
+              </div>
+
+              <div className="mb-2 flex items-center gap-1.5">
+                <input
+                  type={visible ? 'text' : 'password'}
+                  value={cfg.apiKey}
+                  placeholder={provider.keyHint}
+                  onChange={(e) => settings.setApiKey(provider.id, e.target.value)}
+                  className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:border-arc/60"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKeys((s) => ({ ...s, [provider.id]: !visible }))}
+                  className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  title={visible ? 'Ocultar' : 'Mostrar'}
+                >
+                  {visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => test(provider.id)}
+                  disabled={testing === provider.id}
+                  className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                  title="Testar endpoint"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${testing === provider.id ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+
+              {(provider.id === 'custom' || provider.id === 'ollama' || provider.id === 'lmstudio') && (
+                <div className="mb-2 flex items-center gap-1.5">
+                  <Server className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <input
+                    value={cfg.baseUrl}
+                    placeholder="https://servidor/v1"
+                    onChange={(e) => settings.setBaseUrl(provider.id, e.target.value)}
+                    className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:border-arc/60"
+                    spellCheck={false}
+                  />
+                </div>
+              )}
+
+              {result && (
+                <p className={`font-mono text-[10px] ${result.startsWith('OK') ? 'text-emerald-400' : 'text-destructive'}`}>
+                  {result}
+                </p>
+              )}
+
+              {isActive && provider.models.length > 0 && (
+                <div className="mt-2">
+                  <label className="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground">Modelo ativo</label>
+                  <select
+                    value={settings.activeModel}
+                    onChange={(e) => settings.setActiveModel(e.target.value)}
+                    className="w-full rounded border border-border bg-background px-2 py-1 text-[11px] outline-none focus:border-arc/60"
+                  >
+                    {provider.models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label} · {Math.round(m.contextWindow / 1000)}k ctx{m.note ? ` · ${m.note}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-5 mb-1 flex items-center justify-between">
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+          <Zap className="h-4 w-4 text-arc" />
+          Agente
+        </h3>
+      </div>
+      <div className="space-y-2 rounded-lg border border-border bg-card/40 p-3">
+        <NumField label="Maximo de passos" value={settings.agent.maxSteps} onChange={(v) => settings.setAgent({ maxSteps: v })} />
+        <NumField
+          label="Maximo de tokens"
+          value={settings.agent.maxTokens}
+          step={50000}
+          onChange={(v) => settings.setAgent({ maxTokens: v })}
+        />
+        <NumField
+          label="Maximo de linhas por patch sem aprovacao"
+          value={settings.agent.maxPatchLines}
+          onChange={(v) => settings.setAgent({ maxPatchLines: v })}
+        />
+      </div>
+
+      <div className="mt-5 mb-1">
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+          <ShieldAlert className="h-4 w-4 text-arc" />
+          Seguranca
+        </h3>
+      </div>
+      <div className="space-y-2 rounded-lg border border-border bg-card/40 p-3 text-[11px] text-muted-foreground">
+        <p>
+          Um patch altera <strong className="text-foreground">exatamente um arquivo</strong>. Se a IA tentar varios, o runtime
+          rejeita antes de escrever.
+        </p>
+        <p>
+          Cada patch passa por verificacao de sintaxe; se quebrar o arquivo, ele e revertido automaticamente.
+        </p>
+        <p>
+          Importacao de ZIP bloqueia path traversal, symlinks e arquivos acima do limite.
+        </p>
+        <button
+          type="button"
+          onClick={() => settings.resetKeys()}
+          className="mt-1 flex items-center gap-1.5 rounded bg-destructive/80 px-2 py-1 text-[11px] text-white hover:bg-destructive"
+        >
+          <Trash2 className="h-3 w-3" />
+          apagar todas as chaves
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NumField({
+  label,
+  value,
+  onChange,
+  step = 1,
+}: {
+  label: string;
+  value: number;
+  onChange(v: number): void;
+  step?: number;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-[11px]">
+      <span className="min-w-0 flex-1 text-muted-foreground">{label}</span>
+      <input
+        type="number"
+        value={value}
+        step={step}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-28 rounded border border-border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:border-arc/60"
+      />
+    </label>
+  );
+}
