@@ -27,6 +27,14 @@ interface SettingsState {
     maxPatchLines: number;
     autoApproveSmall: boolean;
     stream: boolean;
+    /** Gasto maximo da sessao em dolares. 0 = sem limite. */
+    sessionBudgetUsd: number;
+    /** Auto-aplica patch pequeno sem pedir revisao. */
+    fastApply: boolean;
+    /** Salva checkpoint antes de cada passo do agente. */
+    checkpoints: boolean;
+    /** Usa AGENTS.md do projeto como instrucao permanente. */
+    useProjectRules: boolean;
   };
   editor: { fontSize: number; tabSize: number; wordWrap: boolean; minimap: boolean };
   setApiKey: (providerId: string, key: string) => void;
@@ -53,7 +61,17 @@ export const useSettings = create<SettingsState>()(
       activeModel: DEFAULT_MODELS['nvidia-nim'] ?? 'nvidia/llama-3.3-nemotron-super-49b-v1.5',
       routing: { planner: '', coder: '', fast: '' },
       compression: { enabled: true, layers: ['strip', 'dedupe', 'structure', 'window'], windowSize: 40, semantic: false },
-      agent: { maxSteps: 30, maxTokens: 400000, maxPatchLines: 200, autoApproveSmall: true, stream: true },
+      agent: {
+        maxSteps: 30,
+        maxTokens: 400000,
+        maxPatchLines: 200,
+        autoApproveSmall: true,
+        stream: true,
+        sessionBudgetUsd: 5,
+        fastApply: true,
+        checkpoints: true,
+        useProjectRules: true,
+      },
       editor: { fontSize: 13, tabSize: 2, wordWrap: false, minimap: false },
       setApiKey: (providerId, key) =>
         set((s) => {

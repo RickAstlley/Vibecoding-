@@ -36,6 +36,16 @@ export interface KvRow {
   value: unknown;
 }
 
+export interface TaskRow {
+  id: string;
+  runId: string;
+  text: string;
+  status: 'pending' | 'in_progress' | 'done' | 'cancelled';
+  targetPath: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export class WeaverDatabase extends Dexie {
   files!: Table<VFile, string>;
   dirs!: Table<VDir, string>;
@@ -44,6 +54,8 @@ export class WeaverDatabase extends Dexie {
   journal!: Table<JournalRow, number>;
   projects!: Table<ProjectRow, string>;
   kv!: Table<KvRow, string>;
+  checkpoints!: Table<CheckpointRow, string>;
+  tasks!: Table<TaskRow, string>;
 
   constructor(name = 'arcanum-weaver') {
     super(name);
@@ -56,7 +68,28 @@ export class WeaverDatabase extends Dexie {
       projects: '&id, updatedAt',
       kv: '&key',
     });
+    this.version(2).stores({
+      files: '&path, hash, updatedAt, encoding, size',
+      dirs: '&path, updatedAt',
+      snapshots: '&id, path, version, createdAt, [path+version], patchId',
+      messages: '&id, createdAt, runId, role',
+      journal: '&[runId+seq], runId, ts, type, hash',
+      projects: '&id, updatedAt',
+      kv: '&key',
+      checkpoints: '&id, runId, seq, createdAt',
+      tasks: '&id, runId, status, createdAt',
+    });
   }
+}
+
+export interface CheckpointRow {
+  id: string;
+  runId: string;
+  seq: number;
+  label: string;
+  createdAt: number;
+  payload: string;
+  tokens: number;
 }
 
 let instance: WeaverDatabase | null = null;

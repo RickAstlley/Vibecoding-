@@ -180,6 +180,32 @@ export function SettingsPanel() {
           value={settings.agent.maxPatchLines}
           onChange={(v) => settings.setAgent({ maxPatchLines: v })}
         />
+        <NumField
+          label="Orcamento da sessao (US$, 0 = sem limite)"
+          value={settings.agent.sessionBudgetUsd}
+          step={0.5}
+          onChange={(v) => settings.setAgent({ sessionBudgetUsd: v })}
+        />
+        <div className="space-y-1.5 border-t border-border pt-2">
+          <Switch
+            label="Fast apply"
+            hint="Patch pequeno e nao destrutivo entra direto, sem diff para revisao"
+            checked={settings.agent.fastApply}
+            onChange={(v) => settings.setAgent({ fastApply: v })}
+          />
+          <Switch
+            label="Checkpoints"
+            hint="Salva o estado do projeto antes de cada passo, permitindo voltar o agente"
+            checked={settings.agent.checkpoints}
+            onChange={(v) => settings.setAgent({ checkpoints: v })}
+          />
+          <Switch
+            label="Usar AGENTS.md do projeto"
+            hint="Le as regras do projeto como instrucao permanente do agente"
+            checked={settings.agent.useProjectRules}
+            onChange={(v) => settings.setAgent({ useProjectRules: v })}
+          />
+        </div>
       </div>
 
       <div className="mt-5 mb-1">
@@ -209,6 +235,33 @@ export function SettingsPanel() {
         </button>
       </div>
     </div>
+  );
+}
+
+function Switch({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  onChange(v: boolean): void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start gap-2 rounded px-1 py-1 hover:bg-muted/50">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--arc))]"
+      />
+      <span className="min-w-0">
+        <span className="block text-[11px] font-medium">{label}</span>
+        <span className="block text-[10px] text-muted-foreground">{hint}</span>
+      </span>
+    </label>
   );
 }
 

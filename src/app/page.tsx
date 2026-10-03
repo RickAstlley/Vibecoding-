@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ListChecks,
   PanelLeftClose,
   PanelLeftOpen,
   MessageSquare,
@@ -19,6 +20,10 @@ import { CodeEditor } from '@/components/editor/CodeEditor';
 import { Preview, type ConsoleEntry, type SmokeState } from '@/components/preview/Preview';
 import { Chat } from '@/components/chat/Chat';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
+import { SessionPanel } from '@/components/session/SessionPanel';
+import { mergeTasks, parseTasks, type Task } from '@/core/agents/tasks';
+import type { Checkpoint } from '@/core/agents/fast-apply';
+import { checkpointStore } from '@/core/agents/checkpoint-store';
 import { useFiles } from '@/stores/files';
 import { useSettings } from '@/stores/settings';
 import { newMessageId, useUi } from '@/stores/ui';
@@ -28,11 +33,11 @@ import { createZip, extractZip, isZipFile } from '@/core/zip/unzip';
 import { createRuntime, newRunId } from '@/lib/runtime';
 import { AgentRuntime } from '@/core/agents/runtime';
 import { contextWindow } from '@/core/ia/providers';
-import { costOf } from '@/lib/tokens';
+import { costOf, formatCost } from '@/lib/tokens';
 import { MODES } from '@/core/agents/modes';
 import { tryNormalizePath } from '@/core/vfs/paths';
 
-type SidePanel = 'chat' | 'preview' | 'settings' | null;
+type SidePanel = 'chat' | 'preview' | 'settings' | 'session' | null;
 
 export default function WeaverPage() {
   const files = useFiles();
@@ -48,6 +53,8 @@ export default function WeaverPage() {
   const [previewAutoReload, setPreviewAutoReload] = useState(true);
   const [previewSmoke, setPreviewSmoke] = useState(true);
   const [smokeResult, setSmokeResult] = useState<SmokeState | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const runtimeRef = useRef<AgentRuntime | null>(null);
   const approvalResolvers = useRef(new Map<string, (ok: boolean) => void>());
 
@@ -184,6 +191,11 @@ export default function WeaverPage() {
     const goal = ui.draft.trim();
     if (!goal || !canSend || progress.running) return;
 
+    if (settings.agent.sessionBudgetUsd > 0 && ui.sessionCostUsd >= settings.agent.sessionBudgetUsd) {
+      notify(`Orcamento da sessao estourado (${formatCost(ui.sessionCostUsd)}). Aumente o limite ou zere em Configuracoes.`, 'error');
+      return;
+    }
+
     ui.pushMessage({ id: newMessageId(), role: 'user', content: goal, ts: Date.now() });
     ui.setDraft('');
     ui.setRunning(true);
@@ -222,6 +234,17 @@ export default function WeaverPage() {
         useFiles.setState((s) => ({ contents: { ...s.contents, [path]: content } }));
       },
       onCompressionReport: (savedPercent) => ui.setLastSaved(savedPercent),
+      onTasks: (next) => setTasks(next),
+      onCheckpoint: (cp) =>
+        setCheckpoints((prev) => [...prev.filter((c) => c.id !== cp.id), cp]),
+      fastApply: {
+        enabled: settings.agent.fastApply,
+        maxLines: settings.agent.maxPatchLines > 200 ? 12 : Math.min(12, settings.agent.maxPatchLines),
+        alwaysReviewLevels: ['file'],
+        checkpointBefore: settings.agent.checkpoints,
+      },
+      useProjectRules: settings.agent.useProjectRules,
+      sessionCostUsd: ui.sessionCostUsd,
       onApproval: async (path, reason) => {
         return new Promise<boolean>((resolve) => {
           const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -235,9 +258,14 @@ export default function WeaverPage() {
     });
     runtimeRef.current = runtime;
 
+    const runId = newRunId();
+    void checkpointStore.clear(runId);
+    setTasks([]);
+    setCheckpoints([]);
+
     try {
       const status = await runtime.run({
-        runId: newRunId(),
+        runId,
         mode,
         goal,
         providerId,
@@ -259,6 +287,12 @@ export default function WeaverPage() {
         cost: costOf(providerId, { promptTokens: usageIn, completionTokens: usageOut, totalTokens: status.tokensUsed, estimated: true }),
         savedPercent: ui.lastSavedPercent,
       });
+
+      ui.setSessionCost(ui.sessionCostUsd + (costOf(providerId, { promptTokens: usageIn, completionTokens: usageOut, totalTokens: status.tokensUsed, estimated: true }) || 0));
+      ui.setRun(runId, status.step, status.maxSteps, status.tokensUsed);
+
+      const parsed = parseTasks(status.lastSummary, runId);
+      if (parsed.length > 0) setTasks((prev) => mergeTasks(prev, parsed));
 
       await files.refresh();
       if (status.status === 'done') notify(`Concluido em ${status.step} passo(s)`, 'success');
@@ -328,6 +362,13 @@ export default function WeaverPage() {
 
         <PanelBtn icon={<MessageSquare className="h-4 w-4" />} label="Chat" active={sidePanel === 'chat'} onClick={() => switchPanel('chat')} />
         <PanelBtn icon={<Bot className="h-4 w-4" />} label="Agente" active={sidePanel === 'chat'} onClick={() => switchPanel('chat')} />
+        <PanelBtn
+          icon={<ListChecks className="h-4 w-4" />}
+          label="Sessao"
+          active={sidePanel === 'session'}
+          onClick={() => switchPanel('session')}
+          badge={tasks.length > 0 ? `${tasks.filter((t) => t.status === 'done').length}/${tasks.length}` : undefined}
+        />
         <PanelBtn icon={<Eye className="h-4 w-4" />} label="Preview" active={sidePanel === 'preview'} onClick={() => switchPanel('preview')} />
         <PanelBtn icon={<SettingsIcon className="h-4 w-4" />} label="Config" active={sidePanel === 'settings'} onClick={() => switchPanel('settings')} />
 
@@ -453,6 +494,15 @@ export default function WeaverPage() {
             <div className="min-h-0 flex-1">
               {sidePanel === 'settings' ? (
                 <SettingsPanel />
+              ) : sidePanel === 'session' ? (
+                <SessionPanel
+                  tasks={tasks}
+                  checkpoints={checkpoints}
+                  tokensUsed={ui.tokensUsed}
+                  costUsd={ui.sessionCostUsd}
+                  budgetUsd={settings.agent.sessionBudgetUsd}
+                  onRestore={(label) => notify(label, 'info')}
+                />
               ) : sidePanel === 'preview' ? (
                 <Preview
                   refreshToken={previewToken}
@@ -526,11 +576,13 @@ function PanelBtn({
   label,
   active,
   onClick,
+  badge,
 }: {
   icon: React.ReactNode;
   label: string;
   active: boolean;
   onClick(): void;
+  badge?: string;
 }) {
   return (
     <button
@@ -542,6 +594,7 @@ function PanelBtn({
     >
       {icon}
       <span className="hidden sm:inline">{label}</span>
+      {badge && <span className="rounded bg-muted px-1 font-mono text-[10px]">{badge}</span>}
     </button>
   );
 }

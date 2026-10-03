@@ -57,6 +57,7 @@ interface UiState {
   compressionEnabled: boolean;
   compressionLayers: LayerId[];
   lastSavedPercent: number;
+  sessionCostUsd: number;
   approval: ApprovalRequest | null;
   toast: { message: string; kind: 'info' | 'error' | 'success' } | null;
 
@@ -72,6 +73,7 @@ interface UiState {
   appendDelta(id: string, chunk: string): void;
   setCompression(enabled: boolean, layers?: LayerId[]): void;
   setLastSaved(percent: number): void;
+  setSessionCost(cost: number): void;
   addPatch(patch: PatchRecord): void;
   setApproval(approval: ApprovalRequest | null): void;
   setToast(toast: { message: string; kind: 'info' | 'error' | 'success' } | null): void;
@@ -102,6 +104,7 @@ export const useUi = create<UiState>()(
       compressionEnabled: true,
       compressionLayers: ['strip', 'dedupe', 'structure', 'window'],
       lastSavedPercent: 0,
+      sessionCostUsd: 0,
       approval: null,
       toast: null,
 
@@ -122,6 +125,7 @@ export const useUi = create<UiState>()(
       setCompression: (compressionEnabled, compressionLayers) =>
         set({ compressionEnabled, ...(compressionLayers ? { compressionLayers } : {}) }),
       setLastSaved: (lastSavedPercent) => set({ lastSavedPercent }),
+      setSessionCost: (sessionCostUsd) => set({ sessionCostUsd }),
       addPatch: (patch) => set({ patches: [patch, ...get().patches].slice(0, 100) }),
       setApproval: (approval) => set({ approval }),
       setToast: (toast) => set({ toast }),
@@ -136,6 +140,7 @@ export const useUi = create<UiState>()(
         mode: s.mode,
         compressionEnabled: s.compressionEnabled,
         compressionLayers: s.compressionLayers,
+        sessionCostUsd: s.sessionCostUsd,
       }),
     },
   ),

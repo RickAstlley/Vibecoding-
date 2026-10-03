@@ -77,6 +77,12 @@ export class AgentRuntime {
   constructor(
     private readonly ctx: ToolExecutionContext & {
       buildContext(goal: string, history: ChatMessage[]): Promise<{ system: string; userBlock: string; history: ChatMessage[] }>;
+      /** Chamado a cada texto do assistente: extrai checklist, plano, etc. */
+      onStepText?(text: string, runId: string): void | Promise<void>;
+      /** Persiste um ponto de retorno antes do passo. */
+      saveCheckpoint?(runId: string, seq: number, label: string, tokens: number): Promise<void>;
+      /** Instrucoes adicionais do projeto (rules files). */
+      extraSystem?(): Promise<string>;
     },
     private readonly jrnl: Journal = journal(),
   ) {}
@@ -121,7 +127,14 @@ export class AgentRuntime {
     this.startedAt = Date.now();
     this.controller = new AbortController();
 
-    const systemPrompt = [SYSTEM_PREAMBLE, config.systemPrompt ?? mode.systemPrompt].join('\n\n');
+    const projectRules = (await this.ctx.extraSystem?.()) ?? '';
+    const systemPrompt = [
+      SYSTEM_PREAMBLE,
+      config.systemPrompt ?? mode.systemPrompt,
+      projectRules ? `## Instrucoes do projeto\n${projectRules}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
     const tools: ToolDef[] = toolsFor(mode.id, mode.toolset);
     const messages: ChatMessage[] = [
       ...(config.history ?? []),
@@ -183,6 +196,7 @@ export class AgentRuntime {
         return status;
       }
 
+      await this.ctx.saveCheckpoint?.(config.runId, this.steps, `antes do passo ${this.steps}`, this.tokens);
       await this.jrnl.append(config.runId, 'step_start', { step: this.steps, tokens: this.tokens });
       events.onHeartbeat?.({ step: this.steps, elapsedMs: status.elapsedMs, tokens: this.tokens });
 
@@ -247,6 +261,8 @@ export class AgentRuntime {
         step: this.steps,
         total: this.tokens,
       });
+
+      if (assistantText) await this.ctx.onStepText?.(assistantText, config.runId);
 
       messages.push({ role: 'assistant', content: assistantText, ...(toolCalls.length ? { toolCalls } : {}) });
 
