@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ExternalLink, Monitor, RotateCw, Smartphone, Tablet, Trash2 } from 'lucide-react';
 import { vfs } from '@/core/vfs/vfs';
 import { browserBridge } from '@/core/browser/bridge-client';
+import { buildBundle, buildPreviewHtml, type BundleResult } from '@/core/build/bundler';
 
 export interface ConsoleEntry {
   level: 'log' | 'warn' | 'error' | 'info';
@@ -14,6 +15,9 @@ export interface ConsoleEntry {
 type Viewport = 'mobile' | 'tablet' | 'desktop';
 
 const WIDTHS: Record<Viewport, number> = { mobile: 390, tablet: 768, desktop: 0 };
+
+const SCRIPT_ENTRY = /\.(tsx?|jsx?|mjs)$/i;
+const MAX_INLINE_BYTES = 2 * 1024 * 1024;
 
 const AUTO_RELOAD_DEBOUNCE_MS = 700;
 const SMOKE_TIMEOUT_MS = 6000;
@@ -33,6 +37,10 @@ export interface PreviewProps {
   smokeTest?: boolean;
   onToggleSmoke?(): void;
   onSmokeChange?(state: SmokeState | null): void;
+  /** Compila TSX/JSX localmente antes de servir. */
+  bundlerEnabled?: boolean;
+  /** Permite buscar pacotes na CDN quando nao ha node_modules. */
+  cdnFallback?: boolean;
 }
 
 function ToggleBtn({
@@ -69,6 +77,8 @@ export function Preview({
   smokeTest = false,
   onToggleSmoke,
   onSmokeChange,
+  bundlerEnabled = true,
+  cdnFallback = true,
 }: PreviewProps) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
@@ -95,20 +105,54 @@ export function Preview({
     [onConsoleChange],
   );
 
-  const syncVfs = useCallback(async () => {
+  /**
+   * Decide a estrategia de servir o projeto:
+   *  - se o entrypoint e script (TSX/JSX) chama o bundler local e envia os
+   *    modulos ja transformados + import map;
+   *  - senao envia os arquivos como estao (HTML/CSS/JS puro).
+   */
+  const syncVfs = useCallback(async (): Promise<{ entry: string | null; bundle: BundleResult | null }> => {
     const files = await vfs().listFiles();
-    if (files.length === 0) {
+    const textFiles = files.filter((f) => f.content !== null && f.size <= MAX_INLINE_BYTES);
+    if (textFiles.length === 0) {
       setEntry(null);
-      return;
+      return { entry: null, bundle: null };
     }
-    const payload: Array<{ path: string; content: string }> = [];
-    for (const f of files) {
-      if (f.content === null) continue;
-      if (f.size > 2 * 1024 * 1024) continue;
-      payload.push({ path: f.path, content: f.content });
+
+    const index = textFiles.find((f) => f.path === 'index.html');
+    const html = index?.content ?? null;
+
+    const candidates = ['src/main.tsx', 'src/main.ts', 'src/main.jsx', 'src/index.tsx', 'src/index.ts', 'main.ts'];
+    const entryPath = candidates.find((p) => files.some((f) => f.path === p)) ?? null;
+
+    const needsBundle = bundlerEnabled && Boolean(entryPath && SCRIPT_ENTRY.test(entryPath));
+    if (!needsBundle || !entryPath) {
+      setEntry(html ? 'index.html' : (textFiles[0]?.path ?? null));
+      return { entry: html ? 'index.html' : (textFiles[0]?.path ?? null), bundle: null };
     }
-    setEntry(payload.find((p) => p.path === 'index.html')?.path ?? null);
-  }, []);
+
+    const byPath = new Map(textFiles.map((f) => [f.path, f.content as string]));
+    const nodeModules = files.some((f) => f.path.startsWith('node_modules/'));
+
+    const result = await buildBundle({
+      entry: entryPath,
+      readProject: async (p) => byPath.get(p) ?? null,
+      readNodeModule: async (p) => {
+        const direct = byPath.get(p);
+        if (direct !== undefined) return direct;
+        const file = await vfs().readText(p);
+        return file;
+      },
+      hasNodeModules: () => nodeModules,
+      allowCdn: cdnFallback,
+    });
+
+    const htmlSource = html ?? '<!doctype html><html><head></head><body><div id="root"></div></body></html>';
+    const bundledHtml = buildPreviewHtml(htmlSource, result);
+
+    setEntry('index.html');
+    return { entry: 'index.html', bundle: result, bundledHtml } as never;
+  }, [cdnFallback, bundlerEnabled]);
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
@@ -131,20 +175,34 @@ export function Preview({
     if (!ready) return;
     let cancelled = false;
     (async () => {
-      await syncVfs();
       const files = await vfs().listFiles();
       if (cancelled) return;
       const reg = await navigator.serviceWorker.ready;
-      reg.active?.postMessage({
-        type: 'vfs:reset',
-      });
-      const text: Array<{ path: string; content: string }> = [];
-      for (const f of files) {
-        if (f.content === null) continue;
-        if (f.size > 2 * 1024 * 1024) continue;
-        text.push({ path: f.path, content: f.content });
+      reg.active?.postMessage({ type: 'vfs:reset' });
+
+      const text = files
+        .filter((f) => f.content !== null && f.size <= MAX_INLINE_BYTES)
+        .map((f) => ({ path: f.path, content: f.content as string }));
+
+      const { bundledHtml, bundle } = (await syncVfs()) as { bundledHtml?: string; bundle: BundleResult | null };
+      if (cancelled) return;
+
+      // Modulos compilados tem precedencia sobre o fonte original.
+      const compiledPaths = new Set<string>();
+      if (bundle) {
+        const modules = bundle.files
+          .filter((f) => f.origin === 'project' || f.origin === 'cdn' || f.origin === 'node_modules')
+          .map((f) => ({ path: f.path, content: new TextDecoder().decode(f.bytes) }));
+        reg.active?.postMessage({ type: 'vfs:put-modules', modules });
+        for (const m of modules) compiledPaths.add(m.path);
+        reg.active?.postMessage({ type: 'vfs:import-map', content: bundle.importMap });
       }
-      reg.active?.postMessage({ type: 'vfs:put-many', files: text });
+
+      const raw = text.filter((f) => !compiledPaths.has(f.path));
+      if (bundledHtml) {
+        raw.push({ path: 'index.html', content: bundledHtml });
+      }
+      reg.active?.postMessage({ type: 'vfs:put-many', files: raw });
     })();
     return () => {
       cancelled = true;

@@ -509,6 +509,8 @@ export default function WeaverPage() {
                   refreshToken={previewToken}
                   autoReload={previewAutoReload}
                   onToggleAutoReload={() => setPreviewAutoReload((v) => !v)}
+                  bundlerEnabled={settings.build.bundlerEnabled}
+                  cdnFallback={settings.build.cdnFallback}
                   smokeTest={previewSmoke}
                   onToggleSmoke={() => setPreviewSmoke((v) => !v)}
                   onSmokeChange={setSmokeResult}

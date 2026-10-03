@@ -38,6 +38,12 @@ interface SettingsState {
     /** Da ao agente acesso ao DOM do preview (browser_*). */
     browserTools: boolean;
   };
+  build: {
+    /** Compila TSX/JSX no preview em vez de servir cru. */
+    bundlerEnabled: boolean;
+    /** Busca pacotes na CDN quando nao ha node_modules no ZIP. */
+    cdnFallback: boolean;
+  };
   editor: { fontSize: number; tabSize: number; wordWrap: boolean; minimap: boolean };
   setApiKey: (providerId: string, key: string) => void;
   setBaseUrl: (providerId: string, url: string) => void;
@@ -47,6 +53,7 @@ interface SettingsState {
   setCompression: (patch: Partial<SettingsState['compression']>) => void;
   setAgent: (patch: Partial<SettingsState['agent']>) => void;
   setEditor: (patch: Partial<SettingsState['editor']>) => void;
+  setBuild: (patch: Partial<SettingsState['build']>) => void;
   resetKeys: () => void;
 }
 
@@ -75,6 +82,7 @@ export const useSettings = create<SettingsState>()(
         useProjectRules: true,
         browserTools: true,
       },
+      build: { bundlerEnabled: true, cdnFallback: true },
       editor: { fontSize: 13, tabSize: 2, wordWrap: false, minimap: false },
       setApiKey: (providerId, key) =>
         set((s) => {
@@ -93,6 +101,7 @@ export const useSettings = create<SettingsState>()(
       setCompression: (patch) => set((s) => ({ compression: { ...s.compression, ...patch } })),
       setAgent: (patch) => set((s) => ({ agent: { ...s.agent, ...patch } })),
       setEditor: (patch) => set((s) => ({ editor: { ...s.editor, ...patch } })),
+      setBuild: (patch) => set((s) => ({ build: { ...s.build, ...patch } })),
       resetKeys: () => set({ providers: defaultProviders() }),
     }),
     {
@@ -105,6 +114,7 @@ export const useSettings = create<SettingsState>()(
         compression: s.compression,
         agent: s.agent,
         editor: s.editor,
+        build: s.build,
       }),
     },
   ),

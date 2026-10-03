@@ -34,10 +34,38 @@ self.addEventListener('message', (event) => {
         cache.set(file.path, { content: file.content, type: mimeFor(file.path) });
       }
     }
+    return;
+  }
+
+  // Modulos ja transformados pelo bundler (TSX -> JS, imports reescritos).
+  if (data.type === 'vfs:put-modules' && Array.isArray(data.modules)) {
+    for (const mod of data.modules) {
+      if (mod && typeof mod.path === 'string' && typeof mod.content === 'string') {
+        cache.set(mod.path, { content: mod.content, type: 'text/javascript; charset=utf-8' });
+      }
+    }
+    return;
+  }
+
+  // Import map do bundle.
+  if (data.type === 'vfs:import-map' && typeof data.content === 'string') {
+    cache.set('__arcanum_import_map.json', { content: data.content, type: 'application/json; charset=utf-8' });
   }
 });
 
 function mimeFor(path) {
+  const scriptLike = ['.ts', '.tsx', '.jsx', '.mts', '.cts'];
+  if (scriptLike.includes(extensionOf(path))) return 'text/javascript; charset=utf-8';
+  return mimeForPlain(path);
+}
+
+function extensionOf(path) {
+  const base = path.split('/').pop() || '';
+  const i = base.lastIndexOf('.');
+  return i <= 0 ? '' : base.slice(i).toLowerCase();
+}
+
+function mimeForPlain(path) {
   const ext = path.split('.').pop().toLowerCase();
   const map = {
     html: 'text/html; charset=utf-8',

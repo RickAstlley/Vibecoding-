@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Key, Eye, EyeOff, RefreshCw, Server, Trash2, Check, Zap, ShieldAlert } from 'lucide-react';
+import { Check, Eye, EyeOff, Key, Package, RefreshCw, Server, ShieldAlert, Trash2, Zap } from 'lucide-react';
 import { PROVIDERS, getProvider } from '@/core/ia/providers';
 import { useSettings } from '@/stores/settings';
 
@@ -212,6 +212,31 @@ export function SettingsPanel() {
             onChange={(v) => settings.setAgent({ useProjectRules: v })}
           />
         </div>
+      </div>
+
+      <div className="mt-5 mb-1">
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+          <Package className="h-4 w-4 text-arc" />
+          Preview e build
+        </h3>
+      </div>
+      <div className="space-y-1.5 rounded-lg border border-border bg-card/40 p-3">
+        <Switch
+          label="Compilar TSX/JSX no preview"
+          hint="Transpila e monta os modulos do projeto para rodar React/Next sem servidor"
+          checked={settings.build.bundlerEnabled}
+          onChange={(v) => settings.setBuild({ bundlerEnabled: v })}
+        />
+        <Switch
+          label="Fallback para CDN"
+          hint="Se o ZIP nao trouxer node_modules, busca pacotes em esm.sh"
+          checked={settings.build.cdnFallback}
+          onChange={(v) => settings.setBuild({ cdnFallback: v })}
+        />
+        <p className="pt-1 text-[10px] text-muted-foreground">
+          Sem node_modules no ZIP, pacotes vem da CDN. Para controle total, importe o projeto com as
+          dependencias instalada.
+        </p>
       </div>
 
       <div className="mt-5 mb-1">
