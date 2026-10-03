@@ -207,7 +207,13 @@ export function Preview({
         raw.push({ path: 'index.html', content: bundledHtml });
       }
       reg.active?.postMessage({ type: 'vfs:put-many', files: raw });
-    })();
+      setSyncToken((n) => n + 1);
+    })().catch((e) => {
+      // sem este catch, uma falha no IndexedDB deixava o preview em 404
+      // sem nenhuma pista do motivo
+      if (cancelled) return;
+      setFatal(`Falha ao preparar o preview: ${e instanceof Error ? e.message : String(e)}`);
+    });
     return () => {
       cancelled = true;
     };
