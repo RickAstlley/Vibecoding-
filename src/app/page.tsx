@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  GitBranch,
+  KeyRound,
   ListChecks,
   PanelLeftClose,
   TerminalIcon,
@@ -23,6 +25,9 @@ import { Chat } from '@/components/chat/Chat';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
 import { SessionPanel } from '@/components/session/SessionPanel';
 import { TerminalPanel } from '@/components/terminal/TerminalPanel';
+import { GitPanel } from '@/components/git/GitPanel';
+import { approvePlan, parsePlan, rejectPlan } from '@/core/agents/cascade';
+import { SecretsPanel } from '@/components/secrets/SecretsPanel';
 import { RUNTIME_INSTRUCTIONS, type RuntimeConfig } from '@/core/runtime';
 import { mergeTasks, parseTasks, type Task } from '@/core/agents/tasks';
 import type { Checkpoint } from '@/core/agents/fast-apply';
@@ -41,7 +46,7 @@ import { costOf, formatCost } from '@/lib/tokens';
 import { MODES } from '@/core/agents/modes';
 import { tryNormalizePath } from '@/core/vfs/paths';
 
-type SidePanel = 'chat' | 'preview' | 'settings' | 'session' | 'terminal' | null;
+type SidePanel = 'chat' | 'preview' | 'settings' | 'session' | 'terminal' | 'git' | 'secrets' | null;
 
 export default function WeaverPage() {
   const files = useFiles();
@@ -326,6 +331,15 @@ export default function WeaverPage() {
       const parsed = parseTasks(status.lastSummary, runId);
       if (parsed.length > 0) setTasks((prev) => mergeTasks(prev, parsed));
 
+      if (ui.mode === 'planner' || ui.mode === 'architect') {
+        const plan = parsePlan(status.lastSummary, runId);
+        if (plan.steps.length > 0) {
+          plan.goal = goal;
+          ui.setPlan(plan);
+          if (ui.plan?.status === 'draft') notify('Plano pronto. Revise e aprove para executar.', 'info');
+        }
+      }
+
       await files.refresh();
       if (status.status === 'done') notify(`Concluido em ${status.step} passo(s)`, 'success');
       else if (status.status === 'paused') notify(`Pausado: ${status.error}`, 'info');
@@ -400,6 +414,18 @@ export default function WeaverPage() {
           active={sidePanel === 'session'}
           onClick={() => switchPanel('session')}
           badge={tasks.length > 0 ? `${tasks.filter((t) => t.status === 'done').length}/${tasks.length}` : undefined}
+        />
+        <PanelBtn
+          icon={<KeyRound className="h-4 w-4" />}
+          label="Segredos"
+          active={sidePanel === 'secrets'}
+          onClick={() => switchPanel('secrets')}
+        />
+        <PanelBtn
+          icon={<GitBranch className="h-4 w-4" />}
+          label="Git"
+          active={sidePanel === 'git'}
+          onClick={() => switchPanel('git')}
         />
         <PanelBtn
           icon={<TerminalIcon className="h-4 w-4" />}
@@ -541,6 +567,10 @@ export default function WeaverPage() {
                   budgetUsd={settings.agent.sessionBudgetUsd}
                   onRestore={(label) => notify(label, 'info')}
                 />
+              ) : sidePanel === 'secrets' ? (
+                <SecretsPanel onMessage={(message, kind) => notify(message, kind)} />
+              ) : sidePanel === 'git' ? (
+                <GitPanel onMessage={(message, kind) => notify(message, kind)} />
               ) : sidePanel === 'terminal' ? (
                 <TerminalPanel
                   config={runtimeConfig}
@@ -568,6 +598,9 @@ export default function WeaverPage() {
                   compressionEnabled={ui.compressionEnabled}
                   savedPercent={ui.lastSavedPercent}
                   approval={ui.approval}
+                  plan={ui.plan}
+                  onPlanApprove={() => ui.setPlan(ui.plan ? { ...approvePlan(ui.plan), status: 'approved' } : null)}
+                  onPlanReject={() => ui.setPlan(ui.plan ? rejectPlan(ui.plan) : null)}
                   canSend={canSend}
                   onDraft={(v) => ui.setDraft(v)}
                   onMode={(m) => ui.setMode(m)}

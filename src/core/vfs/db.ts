@@ -36,6 +36,16 @@ export interface KvRow {
   value: unknown;
 }
 
+export interface CommitDbRow {
+  id: string;
+  message: string;
+  createdAt: number;
+  hash: string;
+  parent: string | null;
+  author: string;
+  payload: string;
+}
+
 export interface TaskRow {
   id: string;
   runId: string;
@@ -56,6 +66,7 @@ export class WeaverDatabase extends Dexie {
   kv!: Table<KvRow, string>;
   checkpoints!: Table<CheckpointRow, string>;
   tasks!: Table<TaskRow, string>;
+  commits!: Table<CommitDbRow, string>;
 
   constructor(name = 'arcanum-weaver') {
     super(name);
@@ -78,6 +89,18 @@ export class WeaverDatabase extends Dexie {
       kv: '&key',
       checkpoints: '&id, runId, seq, createdAt',
       tasks: '&id, runId, status, createdAt',
+    });
+    this.version(3).stores({
+      files: '&path, hash, updatedAt, encoding, size',
+      dirs: '&path, updatedAt',
+      snapshots: '&id, path, version, createdAt, [path+version], patchId',
+      messages: '&id, createdAt, runId, role',
+      journal: '&[runId+seq], runId, ts, type, hash',
+      projects: '&id, updatedAt',
+      kv: '&key',
+      checkpoints: '&id, runId, seq, createdAt',
+      tasks: '&id, runId, status, createdAt',
+      commits: '&id, createdAt, parent, hash',
     });
   }
 }

@@ -5,6 +5,7 @@ import { persist } from 'zustand/middleware';
 import type { AgentMode } from '@/core/agents/modes';
 import type { LayerId } from '@/core/compress/pipeline';
 import type { ContextFileReport } from '@/core/context/builder';
+import type { CascadePlan } from '@/core/agents/cascade';
 
 export interface ChatMessage {
   id: string;
@@ -58,6 +59,7 @@ interface UiState {
   compressionLayers: LayerId[];
   lastSavedPercent: number;
   sessionCostUsd: number;
+  plan: CascadePlan | null;
   approval: ApprovalRequest | null;
   toast: { message: string; kind: 'info' | 'error' | 'success' } | null;
 
@@ -74,6 +76,7 @@ interface UiState {
   setCompression(enabled: boolean, layers?: LayerId[]): void;
   setLastSaved(percent: number): void;
   setSessionCost(cost: number): void;
+  setPlan(plan: CascadePlan | null): void;
   addPatch(patch: PatchRecord): void;
   setApproval(approval: ApprovalRequest | null): void;
   setToast(toast: { message: string; kind: 'info' | 'error' | 'success' } | null): void;
@@ -105,6 +108,7 @@ export const useUi = create<UiState>()(
       compressionLayers: ['strip', 'dedupe', 'structure', 'window'],
       lastSavedPercent: 0,
       sessionCostUsd: 0,
+      plan: null,
       approval: null,
       toast: null,
 
@@ -126,6 +130,7 @@ export const useUi = create<UiState>()(
         set({ compressionEnabled, ...(compressionLayers ? { compressionLayers } : {}) }),
       setLastSaved: (lastSavedPercent) => set({ lastSavedPercent }),
       setSessionCost: (sessionCostUsd) => set({ sessionCostUsd }),
+      setPlan: (plan) => set({ plan }),
       addPatch: (patch) => set({ patches: [patch, ...get().patches].slice(0, 100) }),
       setApproval: (approval) => set({ approval }),
       setToast: (toast) => set({ toast }),
@@ -141,6 +146,7 @@ export const useUi = create<UiState>()(
         compressionEnabled: s.compressionEnabled,
         compressionLayers: s.compressionLayers,
         sessionCostUsd: s.sessionCostUsd,
+        plan: null,
       }),
     },
   ),
