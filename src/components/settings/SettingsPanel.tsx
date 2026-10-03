@@ -200,6 +200,12 @@ export function SettingsPanel() {
             onChange={(v) => settings.setAgent({ checkpoints: v })}
           />
           <Switch
+            label="Ferramentas de browser"
+            hint="Da ao agente acesso ao DOM do preview: ver, clicar e digitar no proprio resultado"
+            checked={settings.agent.browserTools}
+            onChange={(v) => settings.setAgent({ browserTools: v })}
+          />
+          <Switch
             label="Usar AGENTS.md do projeto"
             hint="Le as regras do projeto como instrucao permanente do agente"
             checked={settings.agent.useProjectRules}

@@ -35,6 +35,8 @@ interface SettingsState {
     checkpoints: boolean;
     /** Usa AGENTS.md do projeto como instrucao permanente. */
     useProjectRules: boolean;
+    /** Da ao agente acesso ao DOM do preview (browser_*). */
+    browserTools: boolean;
   };
   editor: { fontSize: number; tabSize: number; wordWrap: boolean; minimap: boolean };
   setApiKey: (providerId: string, key: string) => void;
@@ -71,6 +73,7 @@ export const useSettings = create<SettingsState>()(
         fastApply: true,
         checkpoints: true,
         useProjectRules: true,
+        browserTools: true,
       },
       editor: { fontSize: 13, tabSize: 2, wordWrap: false, minimap: false },
       setApiKey: (providerId, key) =>

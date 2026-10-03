@@ -6,7 +6,7 @@ export interface ModeSpec {
   icon: string;
   description: string;
   systemPrompt: string;
-  toolset: Array<'read' | 'edit' | 'search' | 'run' | 'finish'>;
+  toolset: Array<'read' | 'edit' | 'search' | 'run' | 'finish' | 'browser'>;
   maxStepsDefault: number;
   needsPlan: boolean;
 }
@@ -60,7 +60,7 @@ Formato de saida:
     description: 'Implementa a tarefa com patches cirurgicos, um arquivo por vez',
     maxStepsDefault: 30,
     needsPlan: false,
-    toolset: ['read', 'search', 'edit', 'finish'],
+    toolset: ['read', 'search', 'edit', 'browser', 'finish'],
     systemPrompt: `Voce e o Arcanum Weaver em modo CODADOR. Implemente a tarefa com edicao minima e precisa.
 
 Como editar (escolha a ferramenta certa):
@@ -90,7 +90,7 @@ Para cada achado: arquivo, linha, severidade (critico/alto/medio/baixo) e correc
     description: 'Le o erro do console/stack trace e corrige a causa',
     maxStepsDefault: 15,
     needsPlan: false,
-    toolset: ['read', 'search', 'edit', 'finish'],
+    toolset: ['read', 'search', 'edit', 'browser', 'finish'],
     systemPrompt: `Voce e o Arcanum Weaver em modo DEPURADOR. Descubra a CAUSA RAIZ do erro antes de corrigir.
 Workflow: leia a mensagem de erro -> localize o arquivo e a linha -> leia o contexto -> identifique a causa -> aplique o patch minimo -> explique em uma frase o que estava errado.
 ${SAFETY}`,

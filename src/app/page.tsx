@@ -244,6 +244,7 @@ export default function WeaverPage() {
         checkpointBefore: settings.agent.checkpoints,
       },
       useProjectRules: settings.agent.useProjectRules,
+      browserTools: { enabled: settings.agent.browserTools, timeoutMs: 8000 },
       sessionCostUsd: ui.sessionCostUsd,
       onApproval: async (path, reason) => {
         return new Promise<boolean>((resolve) => {

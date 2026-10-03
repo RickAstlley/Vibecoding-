@@ -83,6 +83,8 @@ export class AgentRuntime {
       saveCheckpoint?(runId: string, seq: number, label: string, tokens: number): Promise<void>;
       /** Instrucoes adicionais do projeto (rules files). */
       extraSystem?(): Promise<string>;
+      /** Habilita as ferramentas browser_* (ver preview). */
+      browserTools?: { enabled: boolean; timeoutMs: number };
     },
     private readonly jrnl: Journal = journal(),
   ) {}
@@ -135,7 +137,7 @@ export class AgentRuntime {
     ]
       .filter(Boolean)
       .join('\n\n');
-    const tools: ToolDef[] = toolsFor(mode.id, mode.toolset);
+    const tools: ToolDef[] = toolsFor(mode.id, mode.toolset, { browser: this.ctx.browserTools });
     const messages: ChatMessage[] = [
       ...(config.history ?? []),
       { role: 'user', content: config.goal },

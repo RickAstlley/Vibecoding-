@@ -1,5 +1,6 @@
 import type { ToolDef } from '../ia/client';
 import type { AgentMode } from './modes';
+import { BROWSER_TOOLS, runBrowserTool, type BrowserToolsConfig } from '../browser/tools';
 
 export interface ToolResultPayload {
   ok: boolean;
@@ -64,7 +65,15 @@ const FINISH_SCHEMA = {
   required: ['summary', 'done'],
 } as const;
 
-export function toolsFor(mode: AgentMode, toolset: Array<'read' | 'edit' | 'search' | 'run' | 'finish'>): ToolDef[] {
+export interface ToolOptions {
+  browser?: BrowserToolsConfig;
+}
+
+export function toolsFor(
+  mode: AgentMode,
+  toolset: Array<'read' | 'edit' | 'search' | 'run' | 'finish' | 'browser'>,
+  options: ToolOptions = {},
+): ToolDef[] {
   const tools: ToolDef[] = [];
   const allow = (t: 'read' | 'edit' | 'search' | 'run' | 'finish'): boolean => toolset.includes(t);
 
@@ -102,6 +111,10 @@ export function toolsFor(mode: AgentMode, toolset: Array<'read' | 'edit' | 'sear
     });
   }
 
+  if (toolset.includes('browser') && options.browser?.enabled !== false) {
+    tools.push(...BROWSER_TOOLS);
+  }
+
   if (allow('finish')) {
     tools.push({
       name: 'finish',
@@ -122,6 +135,7 @@ export interface ToolExecutionContext {
   listFiles(): Promise<string[]>;
   search(query: string, scope?: string, regex?: boolean): Promise<Array<{ path: string; line: number; text: string }>>;
   applyEdit(tool: string, args: Record<string, unknown>): Promise<ToolResultPayload>;
+  browser?: BrowserToolsConfig;
 }
 
 export async function executeTool(
@@ -154,6 +168,14 @@ export async function executeTool(
     case 'edit_anchor':
     case 'write_file': {
       return ctx.applyEdit(name, args);
+    }
+    case 'browser_snapshot':
+    case 'browser_query':
+    case 'browser_read':
+    case 'browser_click':
+    case 'browser_type': {
+      const outcome = await runBrowserTool(name, args, ctx.browser ?? { enabled: true, timeoutMs: 8000 });
+      return { ok: outcome.ok, summary: outcome.summary, data: { context: outcome.context } };
     }
     case 'finish': {
       return { ok: true, summary: String(args.summary ?? ''), data: { done: Boolean(args.done) } };

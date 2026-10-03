@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ExternalLink, Monitor, RotateCw, Smartphone, Tablet, Trash2 } from 'lucide-react';
 import { vfs } from '@/core/vfs/vfs';
+import { browserBridge } from '@/core/browser/bridge-client';
 
 export interface ConsoleEntry {
   level: 'log' | 'warn' | 'error' | 'info';
@@ -150,6 +151,8 @@ export function Preview({
     };
   }, [ready, refreshToken, syncVfs]);
 
+  useEffect(() => () => browserBridge().detach(), []);
+
   const smokeErrors = useRef<string[]>([]);
   const smokeTimer = useRef<number | null>(null);
 
@@ -217,6 +220,7 @@ export function Preview({
   const reload = (): void => {
     setEntries([]);
     smokeErrors.current = [];
+    browserBridge().detach();
     startSmoke();
     reloadKey.current += 1;
     setReloadNonce(reloadKey.current);

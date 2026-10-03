@@ -39,6 +39,8 @@ export interface AppDeps {
   fastApply?: FastApplyConfig;
   useProjectRules?: boolean;
   sessionCostUsd?: number;
+  browserTools?: { enabled: boolean; timeoutMs: number };
+  browserTimeoutMs?: number;
 }
 
 async function searchCode(query: string, scope?: string, useRegex = false): Promise<Array<{ path: string; line: number; text: string }>> {
@@ -138,6 +140,7 @@ export function createRuntime(deps: AppDeps): AgentRuntime {
 
   return new AgentRuntime({
     ...toolCtx,
+    browserTools: deps.browserTools ?? { enabled: true, timeoutMs: deps.browserTimeoutMs ?? 8000 },
     onStepText: async (text: string, runId: string): Promise<void> => {
       const parsed = parseTasks(text, runId);
       if (parsed.length > 0) {
