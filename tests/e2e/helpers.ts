@@ -2,7 +2,11 @@ import { expect, type Page } from '@playwright/test';
 
 export async function boot(page: Page): Promise<void> {
   await page.addInitScript(() => {
+    // Limpa uma vez por contexto de teste. Se limpasse a cada navegacao,
+    // o reload de setApiKey apagaria a chave antes do agente rodar.
     try {
+      if (sessionStorage.getItem('__arcanum_booted')) return;
+      sessionStorage.setItem('__arcanum_booted', '1');
       localStorage.clear();
     } catch {
       /* ignora */
