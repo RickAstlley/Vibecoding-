@@ -139,6 +139,25 @@ public/
 └─ .htaccess       configuração Apache/Hostinger
 ```
 
+## Testes
+
+| Camada | Quantidade | Comando |
+|---|---|---|
+| Unitários | 395 | `npm test` |
+| E2E (Chromium real) | 19 | `npm run test:e2e` |
+
+Os testes E2E rodam o app de verdade: IndexedDB, Service Worker, iframe
+do preview e CodeMirror. Só o provider de IA é simulado.
+
+```bash
+npm ci
+npx playwright install --with-deps chromium   # só na primeira vez
+npm run test:e2e
+```
+
+O que a verificação encontrou e o que continua sem prova está em
+[docs/verificacao.md](docs/verificacao.md).
+
 ## Limitações conhecidas
 
 - Preview serve arquivos estáticos; projetos que precisam de build (Vite/Next) não são compilados no navegador — são servidos os arquivos como estão.
