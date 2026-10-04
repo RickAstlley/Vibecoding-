@@ -236,6 +236,9 @@ export function CodeEditor({
 
     const instance = new EditorView({ state, parent });
     view.current = instance;
+    // exposto para os testes E2E dirigirem o editor sem simular digitacao
+    (parent as unknown as { __cmView?: EditorView }).__cmView = instance;
+    parent.dataset.cmReady = '1';
 
     return () => {
       instance.destroy();

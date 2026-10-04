@@ -1,7 +1,6 @@
 /* Service Worker do Arcanum Weaver: serve arquivos do VFS para o iframe de preview.
    Escopo restrito a /__preview__/ para nao interferir no app. */
 
-const CHANNEL = '__arcanum_vfs__';
 const cache = new Map();
 
 self.addEventListener('install', () => self.skipWaiting());
@@ -35,10 +34,38 @@ self.addEventListener('message', (event) => {
         cache.set(file.path, { content: file.content, type: mimeFor(file.path) });
       }
     }
+    return;
+  }
+
+  // Modulos ja transformados pelo bundler (TSX -> JS, imports reescritos).
+  if (data.type === 'vfs:put-modules' && Array.isArray(data.modules)) {
+    for (const mod of data.modules) {
+      if (mod && typeof mod.path === 'string' && typeof mod.content === 'string') {
+        cache.set(mod.path, { content: mod.content, type: 'text/javascript; charset=utf-8' });
+      }
+    }
+    return;
+  }
+
+  // Import map do bundle.
+  if (data.type === 'vfs:import-map' && typeof data.content === 'string') {
+    cache.set('__arcanum_import_map.json', { content: data.content, type: 'application/json; charset=utf-8' });
   }
 });
 
 function mimeFor(path) {
+  const scriptLike = ['.ts', '.tsx', '.jsx', '.mts', '.cts'];
+  if (scriptLike.includes(extensionOf(path))) return 'text/javascript; charset=utf-8';
+  return mimeForPlain(path);
+}
+
+function extensionOf(path) {
+  const base = path.split('/').pop() || '';
+  const i = base.lastIndexOf('.');
+  return i <= 0 ? '' : base.slice(i).toLowerCase();
+}
+
+function mimeForPlain(path) {
   const ext = path.split('.').pop().toLowerCase();
   const map = {
     html: 'text/html; charset=utf-8',
@@ -69,26 +96,55 @@ function mimeFor(path) {
 
 const TRANSFORMERS = ['text/html', 'text/javascript', 'application/json', 'text/css'];
 
+const BRIDGE_PATH = '/__preview__/__arcanum_bridge.js';
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
   if (!url.pathname.startsWith('/__preview__/')) return;
 
-  const requested = decodeURIComponent(url.pathname.slice('/__preview__/'.length)) || 'index.html';
+  if (url.pathname === BRIDGE_PATH) {
+    // r.text() e nao r.text: passar o metodo faz o Response serializar a
+    // propria funcao ("function text() { [native code] }") e o preview
+    // quebrava com "Unexpected identifier 'code'".
+    event.respondWith(
+      fetch('/preview-bridge.js').then((r) =>
+        r.text().then(
+          (body) =>
+            new Response(body, {
+              status: 200,
+              headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' },
+            }),
+        ),
+      ),
+    );
+    return;
+  }
+
+  let requested = decodeURIComponent(url.pathname.slice('/__preview__/'.length)) || 'index.html';
+
+  // URLs emitidas pelo bundler carregam o prefixo __arcanum_; o cache usa o
+  // caminho original do projeto, entao o prefixo tem de sair aqui.
+  const BUILTIN = '__arcanum_';
+  if (requested.startsWith(BUILTIN)) {
+    requested = requested.slice(BUILTIN.length);
+    if (!requested) requested = 'index.html';
+  }
+
   const candidates = [requested, requested.endsWith('/') ? `${requested}index.html` : requested];
   if (requested === '/' || requested === '') candidates.unshift('index.html');
 
   for (const candidate of candidates) {
     const entry = cache.get(candidate);
     if (entry) {
-      event.respondWith(respond(entry, url));
+      event.respondWith(respond(entry));
       return;
     }
   }
 
   const fallback = cache.get('index.html');
   if (fallback && (requested === '' || !requested.includes('.'))) {
-    event.respondWith(respond(fallback, url));
+    event.respondWith(respond(fallback));
     return;
   }
 
@@ -100,10 +156,10 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-function respond(entry, url) {
+function respond(entry) {
   const isHtml = entry.type.startsWith('text/html');
   const isText = isHtml || entry.type.startsWith('text/') || TRANSFORMERS.includes(entry.type);
-  const body = isHtml ? injectBridge(rewrite(entry.content, url)) : isText ? rewrite(entry.content, url) : entry.content;
+  const body = isHtml ? injectBridge(rewrite(entry.content)) : isText ? rewrite(entry.content) : entry.content;
   return new Response(body, {
     status: 200,
     headers: { 'content-type': entry.type, 'cache-control': 'no-store', 'access-control-allow-origin': '*' },
@@ -111,51 +167,29 @@ function respond(entry, url) {
 }
 
 /**
- * Injeta um relay de console e erros no HTML servido, para que o painel do
- * preview mostre o que a pagina loga. Como o iframe roda em sandbox sem
- * allow-same-origin, o targetOrigin precisa ser '*'.
+ * Injeta o bridge de console e driver de DOM no HTML servido.
+ * O script vive em /preview-bridge.js para poder ser mantido e testado
+ * fora deste arquivo.
  */
 function injectBridge(html) {
-  const script = `<script data-arcanum-bridge>(function(){
-  var post = function(level, text){ try { parent.postMessage({ type: 'console', level: level, text: String(text) }, '*'); } catch (e) {} };
-  var fmt = function(args){
-    var out = [];
-    for (var i = 0; i < args.length; i++) {
-      var a = args[i];
-      if (typeof a === 'string') { out.push(a); continue; }
-      if (a instanceof Error) { out.push(a.name + ': ' + a.message); continue; }
-      try { out.push(JSON.stringify(a)); } catch (e) { out.push(String(a)); }
-    }
-    return out.join(' ');
-  };
-  ['log','info','warn','error','debug'].forEach(function(level){
-    var orig = console[level];
-    console[level] = function(){ post(level, fmt(arguments)); orig.apply(console, arguments); };
-  });
-  window.addEventListener('error', function(e){
-    post('error', e.message + (e.filename ? ' (' + String(e.filename).split('/__preview__/').pop() + ':' + e.lineno + ')' : ''));
-  });
-  window.addEventListener('unhandledrejection', function(e){
-    var r = e.reason;
-    post('error', 'Promise rejeitada sem tratamento: ' + (r && r.message ? r.message : String(r)));
-  });
-  parent.postMessage({ type: 'ready' }, '*');
-})();</script>`;
-
-  if (/<head[^>]*>/i.test(html)) return html.replace(/<head([^>]*)>/i, `<head$1>${script}`);
-  if (/<body[^>]*>/i.test(html)) return html.replace(/<body([^>]*)>/i, `<body$1>${script}`);
-  return script + html;
+  const tag = '<script data-arcanum-bridge src="/__preview__/__arcanum_bridge.js" defer></script>';
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head([^>]*)>/i, `<head$1>${tag}`);
+  if (/<body[^>]*>/i.test(html)) return html.replace(/<body([^>]*)>/i, `<body$1>${tag}`);
+  return tag + html;
 }
 
 /**
  * Reescreve URLs absolutos (/styles.css, /src/main.tsx) para o namespace
  * do preview, para que o Service Worker consiga interceptar tudo.
  */
-function rewrite(html, baseUrl) {
+function rewrite(html) {
+  // URLs que ja apontam para o preview nao recebem o prefixo de novo, senao
+  // viram /__preview__/__preview__/__arcanum_...
+  const already = '(?!(?:\\/|__preview__\\/))';
   let out = html;
-  out = out.replace(/(\s(?:src|href)\s*=\s*["'])\/(?!\/)/g, `$1/__preview__/`);
-  out = out.replace(/(from\s+['"])\/(?!\/)/g, '$1/__preview__/');
-  out = out.replace(/import\(\s*['"]\/(?!\/)/g, 'import("/__preview__/');
-  out = out.replace(/new\s+Worker\(\s*['"]\/(?!\/)/g, `new Worker("/__preview__/`);
+  out = out.replace(new RegExp(`(\\s(?:src|href)\\s*=\\s*["'])\\/${already}`, 'g'), '$1/__preview__/');
+  out = out.replace(new RegExp(`(from\\s+['"])\\/${already}`, 'g'), '$1/__preview__/');
+  out = out.replace(new RegExp(`import\\(\\s*['"]\\/${already}`, 'g'), 'import("/__preview__/');
+  out = out.replace(new RegExp(`new\\s+Worker\\(\\s*['"]\\/${already}`, 'g'), 'new Worker("/__preview__/');
   return out;
 }

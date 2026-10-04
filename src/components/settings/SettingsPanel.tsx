@@ -1,12 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { Key, Eye, EyeOff, RefreshCw, Server, Trash2, Check, Zap, ShieldAlert } from 'lucide-react';
+import { Check, Eye, EyeOff, Key, Package, RefreshCw, Server, ShieldAlert, Terminal as TerminalIcon, Trash2, Zap } from 'lucide-react';
 import { PROVIDERS, getProvider } from '@/core/ia/providers';
 import { useSettings } from '@/stores/settings';
+import { crossOriginIsolated } from '@/core/runtime/adapter';
 
 export function SettingsPanel() {
   const settings = useSettings();
+  const isolated = typeof crossOriginIsolated === 'function' ? crossOriginIsolated() : false;
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
@@ -180,6 +182,152 @@ export function SettingsPanel() {
           value={settings.agent.maxPatchLines}
           onChange={(v) => settings.setAgent({ maxPatchLines: v })}
         />
+        <NumField
+          label="Orcamento da sessao (US$, 0 = sem limite)"
+          value={settings.agent.sessionBudgetUsd}
+          step={0.5}
+          onChange={(v) => settings.setAgent({ sessionBudgetUsd: v })}
+        />
+        <div className="space-y-1.5 border-t border-border pt-2">
+          <Switch
+            label="Fast apply"
+            hint="Patch pequeno e nao destrutivo entra direto, sem diff para revisao"
+            checked={settings.agent.fastApply}
+            onChange={(v) => settings.setAgent({ fastApply: v })}
+          />
+          <Switch
+            label="Checkpoints"
+            hint="Salva o estado do projeto antes de cada passo, permitindo voltar o agente"
+            checked={settings.agent.checkpoints}
+            onChange={(v) => settings.setAgent({ checkpoints: v })}
+          />
+          <Switch
+            label="Ferramentas de browser"
+            hint="Da ao agente acesso ao DOM do preview: ver, clicar e digitar no proprio resultado"
+            checked={settings.agent.browserTools}
+            onChange={(v) => settings.setAgent({ browserTools: v })}
+          />
+          <Switch
+            label="Usar AGENTS.md do projeto"
+            hint="Le as regras do projeto como instrucao permanente do agente"
+            checked={settings.agent.useProjectRules}
+            onChange={(v) => settings.setAgent({ useProjectRules: v })}
+          />
+        </div>
+      </div>
+
+      <div className="mt-5 mb-1">
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+          <Package className="h-4 w-4 text-arc" />
+          Preview e build
+        </h3>
+      </div>
+      <div className="space-y-1.5 rounded-lg border border-border bg-card/40 p-3">
+        <Switch
+          label="Compilar TSX/JSX no preview"
+          hint="Transpila e monta os modulos do projeto para rodar React/Next sem servidor"
+          checked={settings.build.bundlerEnabled}
+          onChange={(v) => settings.setBuild({ bundlerEnabled: v })}
+        />
+        <Switch
+          label="Fallback para CDN"
+          hint="Se o ZIP nao trouxer node_modules, busca pacotes em esm.sh"
+          checked={settings.build.cdnFallback}
+          onChange={(v) => settings.setBuild({ cdnFallback: v })}
+        />
+        <p className="pt-1 text-[10px] text-muted-foreground">
+          Sem node_modules no ZIP, pacotes vem da CDN. Para controle total, importe o projeto com as
+          dependencias instalada.
+        </p>
+      </div>
+
+      <div className="mt-5 mb-1">
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+          <TerminalIcon className="h-4 w-4 text-arc" />
+          Execucao de codigo
+        </h3>
+      </div>
+      <div className="space-y-2 rounded-lg border border-border bg-card/40 p-3">
+        <div className="grid grid-cols-3 gap-1">
+          {(
+            [
+              { id: 'none' as const, label: 'Desativado' },
+              { id: 'local' as const, label: 'Local (WebContainer)' },
+              { id: 'remote' as const, label: 'Endpoint remoto' },
+            ]
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => settings.setRuntime({ kind: opt.id })}
+              className={`rounded px-2 py-1 text-[10px] transition-colors ${
+                settings.runtime.kind === opt.id
+                  ? 'bg-arc/20 text-arc-fg'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {settings.runtime.kind === 'local' && (
+          <div className="rounded border border-border bg-background/50 p-2 text-[10px] text-muted-foreground">
+            <p className="mb-1 text-foreground">Requer isolamento de origem.</p>
+            <p>
+              O .htaccess deste projeto ja define COOP/COEP. Se o preview reclamar de isolamento, recarregue a
+              pagina depois do deploy - os cabecalhos so valem apos o upload.
+            </p>
+            {!isolated && (
+              <p className="mt-1 text-yellow-400">
+                Esta aba ainda nao esta isolada (provavelmente rodando em localhost sem os cabecalhos).
+              </p>
+            )}
+          </div>
+        )}
+
+        {settings.runtime.kind === 'remote' && (
+          <>
+            <label className="block">
+              <span className="mb-0.5 block text-[10px] text-muted-foreground">URL do executor</span>
+              <input
+                value={settings.runtime.remoteBaseUrl}
+                onChange={(e) => settings.setRuntime({ remoteBaseUrl: e.target.value })}
+                placeholder="https://meu-executor.dev"
+                className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:border-arc/60"
+                spellCheck={false}
+              />
+            </label>
+            <label className="block">
+              <span className="mb-0.5 block text-[10px] text-muted-foreground">Token (opcional)</span>
+              <input
+                type="password"
+                value={settings.runtime.remoteToken}
+                onChange={(e) => settings.setRuntime({ remoteToken: e.target.value })}
+                className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-[11px] outline-none focus:border-arc/60"
+                autoComplete="off"
+              />
+            </label>
+            <p className="text-[10px] text-muted-foreground">
+              Contrato minimo: <code className="font-mono">POST /exec</code> e <code className="font-mono">POST /sync</code>.
+            </p>
+          </>
+        )}
+
+        {settings.runtime.kind !== 'none' && (
+          <NumField
+            label="Timeout de execucao (ms)"
+            value={settings.runtime.timeoutMs}
+            step={5000}
+            onChange={(v) => settings.setRuntime({ timeoutMs: v })}
+          />
+        )}
+
+        {settings.runtime.kind === 'none' && (
+          <p className="text-[10px] text-muted-foreground">
+            Sem execucao, o agente nao roda testes nem build. O preview estatico continua funcionando normalmente.
+          </p>
+        )}
       </div>
 
       <div className="mt-5 mb-1">
@@ -209,6 +357,33 @@ export function SettingsPanel() {
         </button>
       </div>
     </div>
+  );
+}
+
+function Switch({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  onChange(v: boolean): void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start gap-2 rounded px-1 py-1 hover:bg-muted/50">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[hsl(var(--arc))]"
+      />
+      <span className="min-w-0">
+        <span className="block text-[11px] font-medium">{label}</span>
+        <span className="block text-[10px] text-muted-foreground">{hint}</span>
+      </span>
+    </label>
   );
 }
 

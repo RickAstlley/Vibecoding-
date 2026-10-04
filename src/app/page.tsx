@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  FileSearch,
+  GitBranch,
+  KeyRound,
+  ListChecks,
   PanelLeftClose,
+  Plug,
+  Rocket,
+  TerminalIcon,
   PanelLeftOpen,
   MessageSquare,
   Bot,
@@ -19,6 +26,20 @@ import { CodeEditor } from '@/components/editor/CodeEditor';
 import { Preview, type ConsoleEntry, type SmokeState } from '@/components/preview/Preview';
 import { Chat } from '@/components/chat/Chat';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
+import { WalkthroughPanel } from '@/components/agents/WalkthroughPanel';
+import { DeployPanel } from '@/components/deploy/DeployPanel';
+import { McpPanel } from '@/components/mcp/McpPanel';
+import { RagPanel } from '@/components/rag/RagPanel';
+import { installTestHooks } from '@/lib/testHooks';
+import { SessionPanel } from '@/components/session/SessionPanel';
+import { TerminalPanel } from '@/components/terminal/TerminalPanel';
+import { GitPanel } from '@/components/git/GitPanel';
+import { approvePlan, parsePlan, rejectPlan } from '@/core/agents/cascade';
+import { SecretsPanel } from '@/components/secrets/SecretsPanel';
+import { RUNTIME_INSTRUCTIONS, type RuntimeConfig } from '@/core/runtime';
+import { mergeTasks, parseTasks, type Task } from '@/core/agents/tasks';
+import type { Checkpoint } from '@/core/agents/fast-apply';
+import { checkpointStore } from '@/core/agents/checkpoint-store';
 import { useFiles } from '@/stores/files';
 import { useSettings } from '@/stores/settings';
 import { newMessageId, useUi } from '@/stores/ui';
@@ -26,13 +47,14 @@ import { vfs } from '@/core/vfs/vfs';
 import { detectLanguage } from '@/core/vfs/file';
 import { createZip, extractZip, isZipFile } from '@/core/zip/unzip';
 import { createRuntime, newRunId } from '@/lib/runtime';
+import { createRuntime as createCodeRuntime, type RuntimeToolContext } from '@/core/runtime';
 import { AgentRuntime } from '@/core/agents/runtime';
 import { contextWindow } from '@/core/ia/providers';
-import { costOf } from '@/lib/tokens';
+import { costOf, formatCost } from '@/lib/tokens';
 import { MODES } from '@/core/agents/modes';
 import { tryNormalizePath } from '@/core/vfs/paths';
 
-type SidePanel = 'chat' | 'preview' | 'settings' | null;
+type SidePanel = 'chat' | 'preview' | 'settings' | 'session' | 'terminal' | 'git' | 'secrets' | 'review' | 'deploy' | 'mcp' | 'rag' | null;
 
 export default function WeaverPage() {
   const files = useFiles();
@@ -48,14 +70,45 @@ export default function WeaverPage() {
   const [previewAutoReload, setPreviewAutoReload] = useState(true);
   const [previewSmoke, setPreviewSmoke] = useState(true);
   const [smokeResult, setSmokeResult] = useState<SmokeState | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
+
   const runtimeRef = useRef<AgentRuntime | null>(null);
   const approvalResolvers = useRef(new Map<string, (ok: boolean) => void>());
+
+  const runtimeConfig: RuntimeConfig = useMemo(
+    () => ({
+      kind: settings.runtime.kind,
+      remote: { baseUrl: settings.runtime.remoteBaseUrl, token: settings.runtime.remoteToken, timeoutMs: settings.runtime.timeoutMs },
+      local: { timeoutMs: settings.runtime.timeoutMs },
+    }),
+    [settings.runtime],
+  );
+
+  const runtimeCtx = useMemo<RuntimeToolContext | undefined>(() => {
+    if (settings.runtime.kind === 'none') return undefined;
+    const adapter = createCodeRuntime(runtimeConfig);
+    return {
+      exec: async (command, timeoutMs) => {
+        const r = await adapter.exec({ command, language: 'auto', ...(timeoutMs ? { timeoutMs } : {}) });
+        return { ok: r.ok, stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, ...(r.error ? { error: r.error } : {}) };
+      },
+      install: async () => {
+        const r = await adapter.install();
+        return { ok: r.ok, stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, ...(r.error ? { error: r.error } : {}) };
+      },
+    };
+  }, [runtimeConfig, settings.runtime.kind]);
 
   const activeContent = files.activePath ? (files.contents[files.activePath] ?? '') : '';
   const activeLanguage = files.activePath ? detectLanguage(files.activePath) : ('text' as const);
 
   const lastPatch = ui.messages.filter((m) => m.patch).at(-1)?.patch;
   const highlightLines = useMemo(() => lastPatch?.changedLines ?? [], [lastPatch]);
+
+  useEffect(() => {
+    installTestHooks();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -184,6 +237,11 @@ export default function WeaverPage() {
     const goal = ui.draft.trim();
     if (!goal || !canSend || progress.running) return;
 
+    if (settings.agent.sessionBudgetUsd > 0 && ui.sessionCostUsd >= settings.agent.sessionBudgetUsd) {
+      notify(`Orcamento da sessao estourado (${formatCost(ui.sessionCostUsd)}). Aumente o limite ou zere em Configuracoes.`, 'error');
+      return;
+    }
+
     ui.pushMessage({ id: newMessageId(), role: 'user', content: goal, ts: Date.now() });
     ui.setDraft('');
     ui.setRunning(true);
@@ -222,6 +280,20 @@ export default function WeaverPage() {
         useFiles.setState((s) => ({ contents: { ...s.contents, [path]: content } }));
       },
       onCompressionReport: (savedPercent) => ui.setLastSaved(savedPercent),
+      onTasks: (next) => setTasks(next),
+      onCheckpoint: (cp) =>
+        setCheckpoints((prev) => [...prev.filter((c) => c.id !== cp.id), cp]),
+      fastApply: {
+        enabled: settings.agent.fastApply,
+        maxLines: settings.agent.maxPatchLines > 200 ? 12 : Math.min(12, settings.agent.maxPatchLines),
+        alwaysReviewLevels: ['file'],
+        checkpointBefore: settings.agent.checkpoints,
+      },
+      useProjectRules: settings.agent.useProjectRules,
+      browserTools: { enabled: settings.agent.browserTools, timeoutMs: 8000 },
+      exec: runtimeCtx,
+      runtimeInstructions: runtimeCtx ? RUNTIME_INSTRUCTIONS : '',
+      sessionCostUsd: ui.sessionCostUsd,
       onApproval: async (path, reason) => {
         return new Promise<boolean>((resolve) => {
           const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -235,9 +307,14 @@ export default function WeaverPage() {
     });
     runtimeRef.current = runtime;
 
+    const runId = newRunId();
+    void checkpointStore.clear(runId);
+    setTasks([]);
+    setCheckpoints([]);
+
     try {
       const status = await runtime.run({
-        runId: newRunId(),
+        runId,
         mode,
         goal,
         providerId,
@@ -260,6 +337,21 @@ export default function WeaverPage() {
         savedPercent: ui.lastSavedPercent,
       });
 
+      ui.setSessionCost(ui.sessionCostUsd + (costOf(providerId, { promptTokens: usageIn, completionTokens: usageOut, totalTokens: status.tokensUsed, estimated: true }) || 0));
+      ui.setRun(runId, status.step, status.maxSteps, status.tokensUsed);
+
+      const parsed = parseTasks(status.lastSummary, runId);
+      if (parsed.length > 0) setTasks((prev) => mergeTasks(prev, parsed));
+
+      if (ui.mode === 'planner' || ui.mode === 'architect') {
+        const plan = parsePlan(status.lastSummary, runId);
+        if (plan.steps.length > 0) {
+          plan.goal = goal;
+          ui.setPlan(plan);
+          if (ui.plan?.status === 'draft') notify('Plano pronto. Revise e aprove para executar.', 'info');
+        }
+      }
+
       await files.refresh();
       if (status.status === 'done') notify(`Concluido em ${status.step} passo(s)`, 'success');
       else if (status.status === 'paused') notify(`Pausado: ${status.error}`, 'info');
@@ -273,7 +365,7 @@ export default function WeaverPage() {
       approvalResolvers.current.clear();
       setProgress((p) => ({ ...p, running: false }));
     }
-  }, [canSend, files, notify, progress.running, settings, ui]);
+  }, [canSend, files, notify, progress.running, runtimeCtx, settings, ui]);
 
   const stop = useCallback(() => {
     runtimeRef.current?.abort();
@@ -328,6 +420,40 @@ export default function WeaverPage() {
 
         <PanelBtn icon={<MessageSquare className="h-4 w-4" />} label="Chat" active={sidePanel === 'chat'} onClick={() => switchPanel('chat')} />
         <PanelBtn icon={<Bot className="h-4 w-4" />} label="Agente" active={sidePanel === 'chat'} onClick={() => switchPanel('chat')} />
+        <PanelBtn
+          icon={<ListChecks className="h-4 w-4" />}
+          label="Sessao"
+          active={sidePanel === 'session'}
+          onClick={() => switchPanel('session')}
+          badge={tasks.length > 0 ? `${tasks.filter((t) => t.status === 'done').length}/${tasks.length}` : undefined}
+        />
+        <PanelBtn icon={<FileSearch className="h-4 w-4" />} label="Buscar" active={sidePanel === 'rag'} onClick={() => switchPanel('rag')} />
+        <PanelBtn icon={<Plug className="h-4 w-4" />} label="MCP" active={sidePanel === 'mcp'} onClick={() => switchPanel('mcp')} />
+        <PanelBtn icon={<Rocket className="h-4 w-4" />} label="Publicar" active={sidePanel === 'deploy'} onClick={() => switchPanel('deploy')} />
+        <PanelBtn
+          icon={<ListChecks className="h-4 w-4" />}
+          label="Revisar"
+          active={sidePanel === 'review'}
+          onClick={() => switchPanel('review')}
+        />
+        <PanelBtn
+          icon={<KeyRound className="h-4 w-4" />}
+          label="Segredos"
+          active={sidePanel === 'secrets'}
+          onClick={() => switchPanel('secrets')}
+        />
+        <PanelBtn
+          icon={<GitBranch className="h-4 w-4" />}
+          label="Git"
+          active={sidePanel === 'git'}
+          onClick={() => switchPanel('git')}
+        />
+        <PanelBtn
+          icon={<TerminalIcon className="h-4 w-4" />}
+          label="Terminal"
+          active={sidePanel === 'terminal'}
+          onClick={() => switchPanel('terminal')}
+        />
         <PanelBtn icon={<Eye className="h-4 w-4" />} label="Preview" active={sidePanel === 'preview'} onClick={() => switchPanel('preview')} />
         <PanelBtn icon={<SettingsIcon className="h-4 w-4" />} label="Config" active={sidePanel === 'settings'} onClick={() => switchPanel('settings')} />
 
@@ -453,11 +579,46 @@ export default function WeaverPage() {
             <div className="min-h-0 flex-1">
               {sidePanel === 'settings' ? (
                 <SettingsPanel />
+              ) : sidePanel === 'session' ? (
+                <SessionPanel
+                  tasks={tasks}
+                  checkpoints={checkpoints}
+                  tokensUsed={ui.tokensUsed}
+                  costUsd={ui.sessionCostUsd}
+                  budgetUsd={settings.agent.sessionBudgetUsd}
+                  onRestore={(label) => notify(label, 'info')}
+                />
+              ) : sidePanel === 'rag' ? (
+                <RagPanel />
+              ) : sidePanel === 'mcp' ? (
+                <McpPanel />
+              ) : sidePanel === 'deploy' ? (
+                <DeployPanel
+                  projectName={files.projectName}
+                  bundlerEnabled={settings.build.bundlerEnabled}
+                  onMessage={(message, kind) => notify(message, kind)}
+                />
+              ) : sidePanel === 'review' ? (
+                <WalkthroughPanel
+                  onMessage={(message, kind) => notify(message, kind)}
+                  onClose={() => switchPanel('review')}
+                />
+              ) : sidePanel === 'secrets' ? (
+                <SecretsPanel onMessage={(message, kind) => notify(message, kind)} />
+              ) : sidePanel === 'git' ? (
+                <GitPanel onMessage={(message, kind) => notify(message, kind)} />
+              ) : sidePanel === 'terminal' ? (
+                <TerminalPanel
+                  config={runtimeConfig}
+                  files={files.flatPaths.map((p) => ({ path: p, content: files.contents[p] ?? '' })).filter((f) => f.content !== '')}
+                />
               ) : sidePanel === 'preview' ? (
                 <Preview
                   refreshToken={previewToken}
                   autoReload={previewAutoReload}
                   onToggleAutoReload={() => setPreviewAutoReload((v) => !v)}
+                  bundlerEnabled={settings.build.bundlerEnabled}
+                  cdnFallback={settings.build.cdnFallback}
                   smokeTest={previewSmoke}
                   onToggleSmoke={() => setPreviewSmoke((v) => !v)}
                   onSmokeChange={setSmokeResult}
@@ -473,6 +634,9 @@ export default function WeaverPage() {
                   compressionEnabled={ui.compressionEnabled}
                   savedPercent={ui.lastSavedPercent}
                   approval={ui.approval}
+                  plan={ui.plan}
+                  onPlanApprove={() => ui.setPlan(ui.plan ? { ...approvePlan(ui.plan), status: 'approved' } : null)}
+                  onPlanReject={() => ui.setPlan(ui.plan ? rejectPlan(ui.plan) : null)}
                   canSend={canSend}
                   onDraft={(v) => ui.setDraft(v)}
                   onMode={(m) => ui.setMode(m)}
@@ -526,11 +690,13 @@ function PanelBtn({
   label,
   active,
   onClick,
+  badge,
 }: {
   icon: React.ReactNode;
   label: string;
   active: boolean;
   onClick(): void;
+  badge?: string;
 }) {
   return (
     <button
@@ -542,6 +708,7 @@ function PanelBtn({
     >
       {icon}
       <span className="hidden sm:inline">{label}</span>
+      {badge && <span className="rounded bg-muted px-1 font-mono text-[10px]">{badge}</span>}
     </button>
   );
 }

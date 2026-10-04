@@ -19,6 +19,8 @@ import { MODES, type AgentMode } from '@/core/agents/modes';
 import { DiffViewer } from '@/components/editor/DiffViewer';
 import { formatCost, formatTokens, savingsPercent } from '@/lib/tokens';
 import type { ChatMessage } from '@/stores/ui';
+import { CascadePanel } from '@/components/agents/CascadePanel';
+import type { CascadePlan } from '@/core/agents/cascade';
 
 export interface RunProgress {
   running: boolean;
@@ -37,7 +39,10 @@ export interface ChatProps {
   compressionEnabled: boolean;
   savedPercent: number;
   approval: { path: string; reason: string; resolve(ok: boolean): void } | null;
+  plan: CascadePlan | null;
   canSend: boolean;
+  onPlanApprove?(): void;
+  onPlanReject?(): void;
   onDraft(v: string): void;
   onMode(m: AgentMode): void;
   onSend(): void;
@@ -56,7 +61,10 @@ export function Chat({
   compressionEnabled,
   savedPercent,
   approval,
+  plan,
   canSend,
+  onPlanApprove,
+  onPlanReject,
   onDraft,
   onMode,
   onSend,
@@ -144,6 +152,8 @@ export function Chat({
             </p>
           </div>
         )}
+
+        {plan && <div className="mb-3"><CascadePanel plan={plan} onApprove={onPlanApprove} onReject={onPlanReject} /></div>}
 
         {messages.map((msg) => (
           <MessageBlock

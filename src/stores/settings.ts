@@ -27,6 +27,29 @@ interface SettingsState {
     maxPatchLines: number;
     autoApproveSmall: boolean;
     stream: boolean;
+    /** Gasto maximo da sessao em dolares. 0 = sem limite. */
+    sessionBudgetUsd: number;
+    /** Auto-aplica patch pequeno sem pedir revisao. */
+    fastApply: boolean;
+    /** Salva checkpoint antes de cada passo do agente. */
+    checkpoints: boolean;
+    /** Usa AGENTS.md do projeto como instrucao permanente. */
+    useProjectRules: boolean;
+    /** Da ao agente acesso ao DOM do preview (browser_*). */
+    browserTools: boolean;
+  };
+  build: {
+    /** Compila TSX/JSX no preview em vez de servir cru. */
+    bundlerEnabled: boolean;
+    /** Busca pacotes na CDN quando nao ha node_modules no ZIP. */
+    cdnFallback: boolean;
+  };
+  rememberKeys: boolean;
+  runtime: {
+    kind: 'none' | 'local' | 'remote';
+    remoteBaseUrl: string;
+    remoteToken: string;
+    timeoutMs: number;
   };
   editor: { fontSize: number; tabSize: number; wordWrap: boolean; minimap: boolean };
   setApiKey: (providerId: string, key: string) => void;
@@ -37,6 +60,8 @@ interface SettingsState {
   setCompression: (patch: Partial<SettingsState['compression']>) => void;
   setAgent: (patch: Partial<SettingsState['agent']>) => void;
   setEditor: (patch: Partial<SettingsState['editor']>) => void;
+  setBuild: (patch: Partial<SettingsState['build']>) => void;
+  setRuntime: (patch: Partial<SettingsState['runtime']>) => void;
   resetKeys: () => void;
 }
 
@@ -53,7 +78,21 @@ export const useSettings = create<SettingsState>()(
       activeModel: DEFAULT_MODELS['nvidia-nim'] ?? 'nvidia/llama-3.3-nemotron-super-49b-v1.5',
       routing: { planner: '', coder: '', fast: '' },
       compression: { enabled: true, layers: ['strip', 'dedupe', 'structure', 'window'], windowSize: 40, semantic: false },
-      agent: { maxSteps: 30, maxTokens: 400000, maxPatchLines: 200, autoApproveSmall: true, stream: true },
+      agent: {
+        maxSteps: 30,
+        maxTokens: 400000,
+        maxPatchLines: 200,
+        autoApproveSmall: true,
+        stream: true,
+        sessionBudgetUsd: 5,
+        fastApply: true,
+        checkpoints: true,
+        useProjectRules: true,
+        browserTools: true,
+      },
+      build: { bundlerEnabled: true, cdnFallback: true },
+      rememberKeys: true,
+      runtime: { kind: 'none', remoteBaseUrl: '', remoteToken: '', timeoutMs: 60000 },
       editor: { fontSize: 13, tabSize: 2, wordWrap: false, minimap: false },
       setApiKey: (providerId, key) =>
         set((s) => {
@@ -72,18 +111,27 @@ export const useSettings = create<SettingsState>()(
       setCompression: (patch) => set((s) => ({ compression: { ...s.compression, ...patch } })),
       setAgent: (patch) => set((s) => ({ agent: { ...s.agent, ...patch } })),
       setEditor: (patch) => set((s) => ({ editor: { ...s.editor, ...patch } })),
+      setBuild: (patch) => set((s) => ({ build: { ...s.build, ...patch } })),
+      setRuntime: (patch) => set((s) => ({ runtime: { ...s.runtime, ...patch } })),
+      setRememberKeys: (rememberKeys: boolean) => set({ rememberKeys }),
       resetKeys: () => set({ providers: defaultProviders() }),
     }),
     {
       name: 'arcanum-weaver-settings',
       partialize: (s) => ({
-        providers: s.providers,
+        // com "lembrar chaves" desligado, a chave vive so na memoria da aba:
+        // o preview roda na mesma origem e nao alcanca o localStorage
+        providers: s.rememberKeys
+          ? s.providers
+          : Object.fromEntries(Object.entries(s.providers).map(([id, p]) => [id, { ...p, apiKey: '' }])),
         activeProvider: s.activeProvider,
         activeModel: s.activeModel,
         routing: s.routing,
         compression: s.compression,
         agent: s.agent,
         editor: s.editor,
+        build: s.build,
+        runtime: s.runtime,
       }),
     },
   ),

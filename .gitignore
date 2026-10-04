@@ -1,9 +1,9 @@
 node_modules/
-.next/
-out/
-build/
-dist/
-coverage/
+/.next/
+/out/
+/build/
+/dist/
+/coverage/
 .DS_Store
 *.tsbuildinfo
 next-env.d.ts

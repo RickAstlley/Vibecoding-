@@ -172,14 +172,19 @@ export async function applySurgicalPatch(
 }
 
 function describeRequest(r: PatchRequest): string {
-  switch (r.level) {
-    case 'line':
-      return `line-edit: ${r.ops.map((o) => o.kind).join(', ')}`;
-    case 'anchor':
-      return `anchor-edit: ${r.op.kind} @ ${r.op.anchor}`;
-    case 'file':
-      return 'file-rewrite';
-  }
+  // o caminho entra no rotulo: sem ele o historico mostrava apenas
+  // "line-edit: replace" e nao dava para saber qual arquivo mudou
+  const what = (() => {
+    switch (r.level) {
+      case 'line':
+        return `line-edit: ${r.ops.map((o) => o.kind).join(', ')}`;
+      case 'anchor':
+        return `anchor-edit: ${r.op.kind} @ ${r.op.anchor}`;
+      case 'file':
+        return 'file-rewrite';
+    }
+  })();
+  return `${what} em ${r.path}`;
 }
 
 export function changedLineNumbers(before: string, after: string): number[] {

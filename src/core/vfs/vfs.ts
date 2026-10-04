@@ -3,6 +3,7 @@ import { db, isDbAvailable } from './db';
 import { PathError, dirname, isAncestor, joinPath, normalizePath, segments } from './paths';
 import { buildBinaryFile, buildTextFile, decodeUtf8, encodeUtf8, looksBinary } from './file';
 import { sha256Hex } from '@/lib/hash';
+import { history as globalHistory, type HistoryActor } from '../history/undo';
 
 export const LARGE_FILE_THRESHOLD = 2 * 1024 * 1024;
 
@@ -18,6 +19,11 @@ export interface WriteOptions {
   reason?: string;
   patchId?: string;
   skipSnapshot?: boolean;
+  /** Quem fez a mudanca, para o historico unificado. */
+  actor?: HistoryActor;
+  runId?: string | null;
+  /** Desliga o registro no historico global (usado pelo proprio undo). */
+  skipHistory?: boolean;
 }
 
 type Listener = (paths: string[]) => void;
@@ -136,6 +142,19 @@ export class Vfs {
     return this.serialize(async () => {
       const existing = await db().files.get(p);
       if (existing) await this.snapshot(existing, options);
+
+      if (!options.skipHistory && existing?.content !== content) {
+        await globalHistory().record({
+          actor: options.actor ?? actorOf(options.origin),
+          op: existing ? 'write' : 'create',
+          before: [{ path: p, content: existing?.content ?? null }],
+          after: [{ path: p, content }],
+          ...(options.reason ? { label: options.reason } : {}),
+          runId: options.runId ?? null,
+          patchId: options.patchId ?? null,
+        });
+      }
+
       const next = await buildTextFile(p, content);
       next.version = (existing?.version ?? 0) + 1;
       next.updatedAt = Date.now();
@@ -183,6 +202,16 @@ export class Vfs {
       const file = await db().files.get(p);
       if (file) {
         await this.snapshot(file, { ...options, reason: options.reason ?? 'delete' });
+        if (!options.skipHistory) {
+          await globalHistory().record({
+            actor: options.actor ?? actorOf(options.origin),
+            op: 'delete',
+            before: [{ path: p, content: file.content }],
+            after: [{ path: p, content: null }],
+            label: options.reason ?? `excluiu ${p}`,
+            runId: options.runId ?? null,
+          });
+        }
         await db().files.delete(p);
         this.emit([p]);
         return true;
@@ -322,6 +351,12 @@ export class Vfs {
     const est = await navigator.storage.estimate();
     return { usage: est.usage ?? 0, quota: est.quota ?? 0 };
   }
+}
+
+function actorOf(origin: FileOrigin | undefined): HistoryActor {
+  if (origin === 'agent-patch') return 'agent';
+  if (origin === 'import-zip' || origin === 'external') return 'system';
+  return 'human';
 }
 
 function isProbablyText(bytes: Uint8Array): boolean {

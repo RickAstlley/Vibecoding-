@@ -5,6 +5,11 @@ import { isEntryPoint } from '@/core/context/ranker';
 import { applySurgicalPatch, PatchRejection, newPatchId, type PatchRequest } from '@/core/patch/surgical';
 import { buildContext } from '@/core/context/builder';
 import { AgentRuntime, newRunId, type RunConfig, type RunStatus } from '@/core/agents/runtime';
+import { createCheckpoint, decideApply, type Checkpoint, type FastApplyConfig } from '@/core/agents/fast-apply';
+import { checkpointStore } from '@/core/agents/checkpoint-store';
+import { loadRules, renderRules } from '@/core/agents/rules';
+import { mergeTasks, parseTasks, type Task } from '@/core/agents/tasks';
+import type { RuntimeToolContext } from '@/core/runtime';
 import type { ContextFileReport } from '@/core/context/builder';
 import type { ChatMessage } from '@/core/ia/client';
 import type { ToolExecutionContext } from '@/core/agents/tools';
@@ -17,11 +22,29 @@ export interface AppDeps {
   maxPatchLines: number;
   onDelta?(chunk: string): void;
   onStatus?(status: RunStatus): void;
-  onPatch?(patch: { path: string; before: string; after: string; level: string; changedLines: number[] }): void;
+  onPatch?(patch: {
+    path: string;
+    before: string;
+    after: string;
+    level: string;
+    changedLines: number[];
+    decision: 'fast' | 'review';
+    reason: string;
+  }): void;
   onApproval?(path: string, reason: string): Promise<boolean>;
   onContentChange?(path: string, content: string): void;
   onDelete?(path: string): void;
   onCompressionReport?(savedPercent: number, reports: ContextFileReport[]): void;
+  onCheckpoint?(checkpoint: Checkpoint): void;
+  onTasks?(tasks: Task[]): void;
+  fastApply?: FastApplyConfig;
+  useProjectRules?: boolean;
+  sessionCostUsd?: number;
+  browserTools?: { enabled: boolean; timeoutMs: number };
+  browserTimeoutMs?: number;
+  /** Ponte para execucao de codigo. Ausente = run_command desabilitado. */
+  exec?: RuntimeToolContext;
+  runtimeInstructions?: string;
 }
 
 async function searchCode(query: string, scope?: string, useRegex = false): Promise<Array<{ path: string; line: number; text: string }>> {
@@ -72,16 +95,28 @@ export function createRuntime(deps: AppDeps): AgentRuntime {
             deps.onContentChange?.(p, content);
           },
         });
+        const decision = decideApply({
+          level: applied.level,
+          linesChanged: applied.linesAdded + applied.linesRemoved,
+          linesAdded: applied.linesAdded,
+          linesRemoved: applied.linesRemoved,
+          createsFile: applied.before === '',
+          deletesContent: applied.linesRemoved > 0,
+          config: deps.fastApply,
+        });
+
         deps.onPatch?.({
           path: applied.path,
           before: applied.before,
           after: applied.after,
           level: applied.level,
           changedLines: applied.changedLines,
+          decision: decision.apply,
+          reason: decision.reason,
         });
         return {
           ok: true,
-          summary: `Patch aplicado em ${applied.path}: ${applied.linesAdded + applied.linesRemoved} linha(s) alterada(s)${applied.changedLines.length ? ` (linhas ${applied.changedLines.slice(0, 10).join(', ')})` : ''}. Verificacao de sintaxe: OK.`,
+          summary: `Patch ${decision.apply === 'fast' ? 'aplicado automaticamente' : 'aplicado'} em ${applied.path}: ${applied.linesAdded + applied.linesRemoved} linha(s) alterada(s)${applied.changedLines.length ? ` (linhas ${applied.changedLines.slice(0, 10).join(', ')})` : ''}. Sintaxe: OK.${decision.apply === 'review' ? ' Requer revisao do usuario.' : ''}`,
           patchPath: applied.path,
         };
       } catch (e) {
@@ -93,8 +128,38 @@ export function createRuntime(deps: AppDeps): AgentRuntime {
     },
   };
 
+  let tasks: Task[] = [];
+  const rulesCache = { text: '', loaded: false };
+
+  const ensureRules = async (): Promise<string> => {
+    if (!deps.useProjectRules || rulesCache.loaded) return rulesCache.text;
+    rulesCache.loaded = true;
+    const docs = await loadRules((p) => vfs().readText(p), '');
+    rulesCache.text = renderRules(docs);
+    return rulesCache.text;
+  };
+
+  const snapshotAll = async (): Promise<Array<{ path: string; content: string | null; hash: string }>> =>
+    (await vfs().listFiles()).map((f) => ({ path: f.path, content: f.content, hash: f.hash }));
+
   return new AgentRuntime({
     ...toolCtx,
+    browserTools: deps.browserTools ?? { enabled: true, timeoutMs: deps.browserTimeoutMs ?? 8000 },
+    exec: deps.exec,
+    runtimeInstructions: deps.runtimeInstructions,
+    onStepText: async (text: string, runId: string): Promise<void> => {
+      const parsed = parseTasks(text, runId);
+      if (parsed.length > 0) {
+        tasks = mergeTasks(tasks, parsed);
+        deps.onTasks?.(tasks);
+      }
+    },
+    saveCheckpoint: async (runId: string, seq: number, label: string, tokens: number): Promise<void> => {
+      const cp = await createCheckpoint(runId, seq, label, tokens, snapshotAll);
+      await checkpointStore.save(cp);
+      deps.onCheckpoint?.(cp);
+    },
+    extraSystem: async (): Promise<string> => ensureRules(),
     buildContext: async (goal: string, history: ChatMessage[]) => {
       const files = await vfs().listFiles();
       const rankable = files
