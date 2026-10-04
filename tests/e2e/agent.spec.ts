@@ -4,7 +4,6 @@ import {
   historyEntries,
   listProjectFiles,
   mockProvider,
-  openPanel,
   readProjectFile,
   send,
   setApiKey,
@@ -183,9 +182,9 @@ test.describe('loop do agente', () => {
 
   test('sem chave de API o envio fica bloqueado', async ({ page }) => {
     await boot(page);
-    await openPanel(page, 'Sessao');
 
-    const box = page.getByPlaceholder(/Descreva a tarefa/i);
+    // o chat ja e o painel padrao
+    const box = page.getByPlaceholder(/Descreva a tarefa|Configure uma chave/i);
     await box.fill('teste');
     await expect(page.getByRole('button', { name: /enviar/i })).toBeDisabled();
   });
