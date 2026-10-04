@@ -114,14 +114,20 @@ export async function previewFrame(page: Page, readyText?: string) {
   for (let attempt = 0; attempt < 60; attempt++) {
     const frame = page.frames().find((f) => f.url().includes('/__preview__/index.html'));
     if (frame) {
-      const text = await frame
-        .locator('body')
-        .innerText()
-        .catch(() => '');
-      const notFound = text.includes('404') || text.includes('This page could not be found');
-      const looksEmpty = text.trim().length === 0 && text.includes('<') === false;
-      const matches = readyText ? text.includes(readyText) : true;
-      if (!notFound && !looksEmpty && matches) return frame;
+      // o SW injeta o bridge com data-arcanum-bridge em todo HTML servido;
+      // a pagina 404 do dev server nunca tem esse marcador. Uma pagina cujo
+      // corpo tem apenas <script> nao produz innerText, entao o texto
+      // sozinho nao serve como sinal de carregamento.
+      const state = await frame
+        .evaluate(() => ({
+          ready: document.readyState,
+          text: document.body?.innerText ?? '',
+          bridged: Boolean(document.querySelector('script[data-arcanum-bridge]')),
+        }))
+        .catch(() => null);
+
+      const matches = readyText ? (state?.text.includes(readyText) ?? false) : true;
+      if (state?.bridged && state.ready === 'complete' && matches) return frame;
     }
     await page.waitForTimeout(250);
   }
