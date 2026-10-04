@@ -191,16 +191,63 @@ export async function mockProvider(
       }));
     }
 
+    const payload = {
+      id: 'mock',
+      object: 'chat.completion',
+      model: 'mock-model',
+      choices: [{ index: 0, message, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 100, completion_tokens: 40, total_tokens: 140 },
+    };
+
+    // O runtime sempre pede stream:true, e o parser so aceita frames SSE.
+    // Responder JSON puro faria o tool call passar despercebido.
+    let wantsStream = true;
+    try {
+      const body = JSON.parse(route.request().postData() ?? '{}') as { stream?: boolean };
+      wantsStream = body.stream !== false;
+    } catch {
+      /* assume stream */
+    }
+
+    if (wantsStream) {
+      const chunk = (delta: Record<string, unknown>, finish: string | null): string =>
+        `data: ${JSON.stringify({
+          id: 'mock',
+          object: 'chat.completion.chunk',
+          choices: [{ index: 0, delta, finish_reason: finish }],
+          usage: null,
+        })}\n\n`;
+
+      const frames = [
+        chunk({ role: 'assistant', content: reply.content }, null),
+        ...(reply.toolCalls ?? []).map((tc) =>
+          chunk(
+            {
+              tool_calls: [
+                { index: 0, id: tc.id, type: 'function', function: { name: tc.name, arguments: JSON.stringify(tc.arguments) } },
+              ],
+            },
+            null,
+          ),
+        ),
+        chunk({}, 'stop'),
+        `data: ${JSON.stringify({
+          id: 'mock',
+          object: 'chat.completion.chunk',
+          choices: [],
+          usage: { prompt_tokens: 100, completion_tokens: 40, total_tokens: 140 },
+        })}\n\n`,
+        'data: [DONE]\n\n',
+      ].join('');
+
+      await route.fulfill({ status: options.status ?? 200, contentType: 'text/event-stream', body: frames });
+      return;
+    }
+
     await route.fulfill({
       status: options.status ?? 200,
       contentType: 'application/json',
-      body: JSON.stringify({
-        id: 'mock',
-        object: 'chat.completion',
-        model: 'mock-model',
-        choices: [{ index: 0, message, finish_reason: 'stop' }],
-        usage: { prompt_tokens: 100, completion_tokens: 40, total_tokens: 140 },
-      }),
+      body: JSON.stringify(payload),
     });
   });
 }
