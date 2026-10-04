@@ -1,5 +1,7 @@
 # Arcanum Weaver
 
+[![CI](https://github.com/RickAstlley/Vibecoding-/actions/workflows/ci.yml/badge.svg)](https://github.com/RickAstlley/Vibecoding-/actions/workflows/ci.yml)
+
 IDE de vibecoding que roda como **site estático** — funciona em Hostinger (ou qualquer hospedagem compartilhada) **sem VPS**.
 
 ## O que ele faz
