@@ -29,6 +29,44 @@ export interface VerifyResult {
   kind: VerifyKind;
 }
 
+import { tryParseWithEsbuild, type ParserIssue } from './esbuild-parser';
+
+const SCRIPT_KINDS = new Set<VerifyKind>(['typescript', 'javascript', 'jsx', 'tsx']);
+
+function parserIssuesToVerify(issues: ParserIssue[], rule: string): VerifyIssue[] {
+  return issues.map((i) => ({
+    severity: i.severity === 'warning' ? 'warning' : 'error',
+    message: i.text,
+    line: i.line,
+    rule,
+  }));
+}
+
+export async function verifySourceAsync(path: string, source: string, kind: VerifyKind): Promise<VerifyResult> {
+  if (kind === 'binary') {
+    return { ok: true, issues: [], balanced: true, kind };
+  }
+
+  if (SCRIPT_KINDS.has(kind)) {
+    const parsed = await tryParseWithEsbuild(path, source);
+    if (parsed) {
+      const issues = [
+        ...parserIssuesToVerify(parsed.errors, 'esbuild-syntax'),
+        ...parserIssuesToVerify(parsed.warnings, 'esbuild-syntax'),
+      ];
+      const errors = issues.filter((i) => i.severity === 'error');
+      return {
+        ok: errors.length === 0,
+        issues,
+        balanced: errors.length === 0,
+        kind,
+      };
+    }
+  }
+
+  return verifySource(path, source, kind);
+}
+
 const PAIRS: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
 
 type ScanMode = 'children' | 'tag' | 'expr';

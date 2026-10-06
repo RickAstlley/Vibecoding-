@@ -2,7 +2,7 @@ import { detectLanguage } from '../vfs/file';
 import { sha256Hex } from '@/lib/hash';
 import { applyLinePatch, type LineOp, type LinePatchResult } from './line-edit';
 import { AnchorError, applyAnchorOp, extractAnchors, reanchor, type Anchor, type AnchorOp } from './anchors';
-import { verifySource, type VerifyResult } from './verify';
+import { verifySource, verifySourceAsync, type VerifyResult } from './verify';
 
 export type PatchLevel = 'line' | 'anchor' | 'file';
 
@@ -131,7 +131,7 @@ export async function applySurgicalPatch(
   const verify: VerifyResult =
     skipVerify || kind === 'binary'
       ? { ok: true, issues: [], balanced: true, kind: 'text' }
-      : verifySource(request.path, after, kind as VerifyResult['kind']);
+      : await verifySourceAsync(request.path, after, kind as VerifyResult['kind']);
   const verifyMessages = verify.issues.map((i) => `${i.severity}: ${i.message}${i.line ? ` (linha ${i.line})` : ''}`);
 
   if (!verify.ok) {
@@ -204,5 +204,5 @@ export function summarizePatch(p: PatchApplied): string {
   return `${verb} em ${p.path} (${scope}, +${p.linesAdded}/-${p.linesRemoved})`;
 }
 
-export { applyLinePatch, extractAnchors, reanchor, verifySource };
+export { applyLinePatch, extractAnchors, reanchor, verifySource, verifySourceAsync };
 export type { Anchor, AnchorOp, LineOp };
