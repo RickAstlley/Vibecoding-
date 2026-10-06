@@ -1,5 +1,8 @@
+/**
+ * @vitest-environment node
+ */
 import { describe, expect, it } from 'vitest';
-import { verifySource } from '@/core/patch/verify';
+import { verifySource, verifySourceAsync } from '@/core/patch/verify';
 
 describe('verifySource - TSX (o caso React/Next)', () => {
   const valid = [
@@ -179,5 +182,65 @@ describe('verifySource - regressao TS/JS', () => {
 
   it('nao conta chave em string TS', () => {
     expect(verifySource('a.ts', 'const s = "{ }";\nconst t = 1;', 'typescript').ok).toBe(true);
+  });
+});
+
+describe('verifySourceAsync - verificacao real com esbuild', () => {
+  it('aprova TSX valido com generics e template strings aninhadas', async () => {
+    const src = [
+      'interface Props<T> { items: T[] }',
+      '',
+      'export function List<T>({ items }: Props<T>) {',
+      '  return <ul>{items.map(i => <li key={i}>{`item-${i}`}</li>)}</ul>;',
+      '}',
+    ].join('\n');
+    const r = await verifySourceAsync('a.tsx', src, 'tsx');
+    expect(r.ok).toBe(true);
+    expect(r.issues.filter((i) => i.severity === 'error')).toHaveLength(0);
+  });
+
+  it('reprova erro de sintaxe que o contador de chaves nao pega: const x = ;', async () => {
+    const broken = 'const x = ;';
+    const r = await verifySourceAsync('a.ts', broken, 'typescript');
+    expect(r.ok).toBe(false);
+    expect(r.issues.some((i) => i.rule === 'esbuild-syntax')).toBe(true);
+  });
+
+  it('reprova erro de sintaxe que o contador de chaves nao pega: chave aberta em expressao JSX', async () => {
+    const broken = 'export const A = () => <div>{cond ? <b>1</b> : <i>2</i></div>;';
+    const r = await verifySourceAsync('a.tsx', broken, 'tsx');
+    expect(r.ok).toBe(false);
+  });
+
+  it('reprova funcao com parametro desestruturado sem fechamento de paren', async () => {
+    const broken = 'function f({ a, b) { return a + b; }';
+    const r = await verifySourceAsync('a.js', broken, 'javascript');
+    expect(r.ok).toBe(false);
+    expect(r.issues.some((i) => i.rule === 'esbuild-syntax')).toBe(true);
+  });
+
+  it('reprova JSX com tag de fechamento deletada (erro real do parser)', async () => {
+    const broken = 'export const A = () => <div><span>oi</div>;';
+    const r = await verifySourceAsync('a.tsx', broken, 'tsx');
+    expect(r.ok).toBe(false);
+  });
+
+  it('continua usando heuristica para YAML quando esbuild falha', async () => {
+    const r = await verifySourceAsync('a.yml', 'items:\n\t- a\n', 'yaml');
+    expect(r.ok).toBe(false);
+    expect(r.issues.some((i) => i.rule === 'yaml')).toBe(true);
+  });
+
+  it('detecta variavel declarada sem nome como erro', async () => {
+    const broken = 'const = 1;';
+    const r = await verifySourceAsync('a.ts', broken, 'typescript');
+    expect(r.ok).toBe(false);
+    expect(r.issues.some((i) => i.rule === 'esbuild-syntax')).toBe(true);
+  });
+
+  it('aprova codigo valido complexo', async () => {
+    const src = 'const fn = async <T,>(arr: T[]): Promise<T[]> => arr.map(x => x);';
+    const r = await verifySourceAsync('a.tsx', src, 'tsx');
+    expect(r.ok).toBe(true);
   });
 });
